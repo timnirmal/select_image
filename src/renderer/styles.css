@@ -28,7 +28,7 @@ button:hover { background: #3a3a3a; cursor: pointer; }
 .card img { width: 100%; height: 160px; object-fit: cover; display: block; }
 .card .meta { padding: 8px; font-size: 12px; opacity: 0.9; }
 .badge { display: inline-block; padding: 2px 6px; border-radius: 6px; background: #2f3a2f; color: #9fe09f; margin-left: 6px; }
-.badge.red { background: #3a2f2f; color: #f19999; }
+.badge.red { background: #7a1e1e; color: #fff; }
 #viewerContainer { position: relative; width: 100%; height: calc(100% - 0px); display: flex; align-items: center; justify-content: center; }
 #viewerImage { max-width: 100%; max-height: 100%; object-fit: contain; }
 #viewerMeta { position: absolute; left: 16px; bottom: 16px; background: rgba(0,0,0,0.5); padding: 8px 10px; border-radius: 6px; font-size: 12px; }

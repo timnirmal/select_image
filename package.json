@@ -21,7 +21,7 @@
   },
   "homepage": "https://github.com/timnirmal/select_image#readme",
   "dependencies": {
-    "electron": "^28.3.3",
+    "electron": "^29",
     "exiftool-vendored": "^30.5.0",
     "fast-glob": "^3.3.3"
   },
@@ -33,7 +33,10 @@
     "appId": "com.photo.selector",
     "mac": {
       "category": "public.app-category.photography",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "hardenedRuntime": true
     },
     "files": [
