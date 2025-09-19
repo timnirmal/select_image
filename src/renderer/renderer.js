@@ -2,6 +2,7 @@ const state = {
 	folderPath: null,
 	records: [],
 	currentIndex: 0,
+	metaById: new Map(),
 };
 
 const statusEl = document.getElementById('status');
@@ -24,6 +25,7 @@ function badgeHtml(score) {
 }
 
 function renderGrid() {
+	state.metaById.clear();
 	gridEl.innerHTML = '';
 	for (let i = 0; i < state.records.length; i++) {
 		const r = state.records[i];
@@ -36,7 +38,9 @@ function renderGrid() {
 		img.addEventListener('click', () => { state.currentIndex = i; renderViewer(); showViewer(); });
 		const meta = document.createElement('div');
 		meta.className = 'meta';
+		meta.dataset.id = r.id;
 		meta.innerHTML = `${r.name} ${badgeHtml(r.score)}`;
+		state.metaById.set(r.id, meta);
 		card.appendChild(img);
 		card.appendChild(meta);
 		gridEl.appendChild(card);
@@ -52,11 +56,16 @@ function renderViewer() {
 	setStatus(`${state.records.length} images loaded in memory`);
 }
 
+function updateCardMeta(record) {
+	const meta = state.metaById.get(record.id);
+	if (meta) meta.innerHTML = `${record.name} ${badgeHtml(record.score)}`;
+}
+
 function setScore(score) {
 	const r = state.records[state.currentIndex];
 	r.score = score; // -1 not selected, 0 rejected, 1..5 accepted
 	renderViewer();
-	renderGrid();
+	updateCardMeta(r);
 	scheduleCsvSync();
 }
 
@@ -101,14 +110,23 @@ async function openFolder() {
 	const scoreMap = await loadCsvScores(folderPath);
 	state.records = images.map(img => ({ ...img, score: (scoreMap[img.path] ?? -1) }));
 	state.currentIndex = 0;
+	renderGrid();
 	setStatus(`Generating thumbnails… 0/${state.records.length}`);
 	for (let i = 0; i < state.records.length; i++) {
 		const r = state.records[i];
 		if (!r.thumbDataUrl) r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
-		if (i % 24 === 0) { setStatus(`Generating thumbnails… ${i + 1}/${state.records.length}`); renderGrid(); }
+		if ((i + 1) % 32 === 0) {
+			setStatus(`Generating thumbnails… ${i + 1}/${state.records.length}`);
+			// Update only the image src for already-rendered cards
+			requestAnimationFrame(() => {
+				const meta = state.metaById.get(r.id); // force layout update by touching a node
+				if (meta) meta.innerHTML = `${r.name} ${badgeHtml(r.score)}`;
+			});
+		}
 	}
 	setStatus(`Loaded ${state.records.length} images in memory (skipped ${skipped})`);
-	renderGrid();
+	// Final pass to update thumbnails in DOM
+	requestAnimationFrame(() => renderGrid());
 	if (state.records.length > 0) { renderViewer(); }
 	showGallery();
 }
