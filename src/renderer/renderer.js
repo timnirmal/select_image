@@ -4,6 +4,8 @@ const state = {
 	currentIndex: 0,
 	metaById: new Map(),
 	cardByIndex: [],
+	selectedIndices: new Set(),
+	anchorIndex: null,
 };
 
 const statusEl = document.getElementById('status');
@@ -12,6 +14,9 @@ const viewerEl = document.getElementById('viewer');
 const galleryEl = document.getElementById('gallery');
 const viewerImageEl = document.getElementById('viewerImage');
 const viewerMetaEl = document.getElementById('viewerMeta');
+const zoomSelect = document.getElementById('zoomSelect');
+const clearThumbsBtn = document.getElementById('clearThumbsBtn');
+let viewerZoomMode = 'fit'; // 'fit' or numeric percent
 
 function isGalleryVisible() { return !galleryEl.classList.contains('hidden'); }
 function setStatus(text) { statusEl.textContent = text; }
@@ -36,10 +41,27 @@ function renderGrid() {
 		card.className = 'card';
 		card.dataset.index = String(i);
 		const img = document.createElement('img');
-		img.src = r.thumbDataUrl || r.fullDataUrl;
+		img.src = r.thumbDataUrl || r.fullDataUrl; // fallback to full if thumb missing
 		img.alt = r.name;
 		img.loading = 'lazy';
-		img.addEventListener('click', () => { state.currentIndex = i; renderViewer(); showViewer(); });
+		img.addEventListener('error', () => {
+			if (img.src !== r.fullDataUrl) {
+				img.src = r.fullDataUrl;
+			} else {
+				console.warn('Preview not available for', r.path);
+				img.remove();
+				const ph = document.createElement('div');
+				ph.style.height = '160px';
+				ph.style.background = '#2a2a2a';
+				ph.style.display = 'flex';
+				ph.style.alignItems = 'center';
+				ph.style.justifyContent = 'center';
+				ph.textContent = 'No preview';
+				card.prepend(ph);
+			}
+		});
+		img.addEventListener('click', (ev) => { handleCardClick(i, ev); });
+		img.addEventListener('dblclick', () => { state.currentIndex = i; renderViewer(); showViewer(); });
 		const meta = document.createElement('div');
 		meta.className = 'meta';
 		meta.dataset.id = r.id;
@@ -53,12 +75,64 @@ function renderGrid() {
 	updateGridSelection();
 }
 
+function clearSelection() { state.selectedIndices.clear(); state.anchorIndex = null; renderSelectionClasses(); }
+function renderSelectionClasses() {
+	for (let i = 0; i < state.cardByIndex.length; i++) {
+		const card = state.cardByIndex[i];
+		if (!card) continue;
+		card.classList.toggle('selected', i === state.currentIndex || state.selectedIndices.has(i));
+	}
+}
+
 function updateGridSelection() {
 	for (const card of state.cardByIndex) card.classList.remove('selected');
 	const card = state.cardByIndex[state.currentIndex];
 	if (card) {
 		card.classList.add('selected');
 		card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+	}
+	renderSelectionClasses();
+}
+
+function handleCardClick(i, event) {
+	const isShift = event.shiftKey;
+	const isToggle = event.metaKey || event.ctrlKey;
+	if (isShift && state.anchorIndex != null) {
+		state.selectedIndices.clear();
+		const [a, b] = [state.anchorIndex, i].sort((x, y) => x - y);
+		for (let k = a; k <= b; k++) state.selectedIndices.add(k);
+		state.currentIndex = i;
+	} else if (isToggle) {
+		if (state.selectedIndices.has(i)) state.selectedIndices.delete(i); else state.selectedIndices.add(i);
+		state.anchorIndex = i;
+		state.currentIndex = i;
+	} else {
+		clearSelection();
+		state.currentIndex = i;
+		state.anchorIndex = i;
+	}
+	updateGridSelection();
+}
+
+function applyScoreToSelection(score) {
+	if (isGalleryVisible() && state.selectedIndices.size > 0) {
+		for (const i of state.selectedIndices) { state.records[i].score = score; updateCardMeta(state.records[i]); }
+		scheduleCsvSync();
+	} else {
+		setScore(score);
+	}
+}
+
+function applyViewerZoom() {
+	const r = state.records[state.currentIndex];
+	if (!r) return;
+	const img = viewerImageEl;
+	if (viewerZoomMode === 'fit') {
+		img.style.width = ''; img.style.height = ''; img.style.maxWidth = '100%'; img.style.maxHeight = '100%';
+	} else {
+		const pct = Number(viewerZoomMode);
+		img.style.maxWidth = 'none'; img.style.maxHeight = 'none';
+		img.style.width = pct + '%'; img.style.height = 'auto';
 	}
 }
 
@@ -69,6 +143,7 @@ function renderViewer() {
 	const stateLabel = r.score === -1 ? 'Not selected' : (r.score === 0 ? 'Rejected' : `Accepted • Score ${r.score}`);
 	viewerMetaEl.textContent = `${r.name}  •  ${stateLabel}  •  ${state.currentIndex + 1}/${state.records.length}`;
 	setStatus(`${state.records.length} images loaded in memory`);
+	applyViewerZoom();
 }
 
 function updateCardMeta(record) {
@@ -131,55 +206,122 @@ async function loadCsvScores(folderPath) {
 	return map || {};
 }
 
-async function openFolder() {
-	setStatus('Selecting folder…');
-	const { folderPath, images, skipped } = await window.api.selectFolder();
-	if (!folderPath) { setStatus('No folder selected'); return; }
-	state.folderPath = folderPath;
-	const scoreMap = await loadCsvScores(folderPath);
-	state.records = images.map(img => ({ ...img, score: (scoreMap[img.path] ?? -1) }));
-	state.currentIndex = 0;
-	renderGrid();
-	setStatus(`Generating thumbnails… 0/${state.records.length}`);
-	for (let i = 0; i < state.records.length; i++) {
-		const r = state.records[i];
-		if (!r.thumbDataUrl) r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
-		if ((i + 1) % 32 === 0) {
-			setStatus(`Generating thumbnails… ${i + 1}/${state.records.length}`);
-		}
+viewerEl.addEventListener('wheel', (e) => {
+	if (e.ctrlKey || e.metaKey) {
+		e.preventDefault();
+		if (viewerZoomMode === 'fit') viewerZoomMode = 100;
+		const delta = e.deltaY < 0 ? 10 : -10;
+		viewerZoomMode = Math.max(10, Math.min(800, Number(viewerZoomMode) + delta));
+		zoomSelect.value = String(viewerZoomMode);
+		applyViewerZoom();
 	}
-	setStatus(`Loaded ${state.records.length} images in memory (skipped ${skipped})`);
-	// Final pass to update thumbnails in DOM
-	renderGrid();
-	if (state.records.length > 0) { renderViewer(); }
-	showGallery();
-}
+}, { passive: false });
 
-async function saveCsv() {
-	if (!state.folderPath) { setStatus('No folder open'); return; }
-	await window.api.updateCsv(state.folderPath, state.records);
-	setStatus('CSV saved');
-}
-
-// Keyboard
-window.addEventListener('keydown', (e) => {
-	if (e.key === 'ArrowLeft') { prevImage(); }
-	else if (e.key === 'ArrowRight') { nextImage(); }
-	else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; setScore(r.score === -1 || r.score === 0 ? 5 : -1); }
-	else if (e.key === 'n' || e.key === 'N') { setScore(0); }
-	else if (e.key >= '1' && e.key <= '5') { setScore(parseInt(e.key, 10)); }
-	else if (e.key.toLowerCase() === 'g') { showGallery(); }
-	else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
+zoomSelect.addEventListener('change', () => {
+	const val = zoomSelect.value;
+	viewerZoomMode = val === 'fit' ? 'fit' : Number(val);
+	applyViewerZoom();
 });
 
-// Buttons
 const openBtn = document.getElementById('openBtn');
 const saveBtn = document.getElementById('saveBtn');
 const galleryBtn = document.getElementById('galleryBtn');
 const viewerBtn = document.getElementById('viewerBtn');
+
+let isLoading = false;
+function setLoading(loading, message) {
+	isLoading = loading;
+	openBtn.disabled = loading;
+	saveBtn.disabled = loading;
+	galleryBtn.disabled = loading;
+	viewerBtn.disabled = loading;
+	if (message) setStatus(message);
+}
+
+function readyStatus() {
+	if (state.records.length > 0) setStatus(`Ready • ${state.records.length} images`);
+	else setStatus('Ready. Click Open Folder.');
+}
+
+async function openFolder() {
+	if (isLoading) return;
+	setLoading(true, 'Selecting folder…');
+	let folderPath = null;
+	try {
+		const res = await window.api.selectFolder();
+		if (!res || res.error) { setStatus(res && res.error ? `Error: ${res.error}` : 'Selection failed'); return; }
+		folderPath = res.folderPath;
+		if (!folderPath) { setStatus('Selection canceled'); return; }
+		const images = res.images || [];
+		const skipped = res.skipped || 0;
+		state.folderPath = folderPath;
+		const scoreMap = await loadCsvScores(folderPath);
+		state.records = images.map(img => ({ ...img, score: (scoreMap[img.path] ?? -1) }));
+		state.currentIndex = 0;
+		renderGrid();
+		setStatus(`Loading thumbnails… 0/${state.records.length}`);
+		for (let i = 0; i < state.records.length; i++) {
+			const r = state.records[i];
+			const cached = await window.api.getThumb(state.folderPath, r.id);
+			if (cached) {
+				r.thumbDataUrl = cached;
+				const card = state.cardByIndex[i];
+				if (card) { const img = card.querySelector('img'); if (img) img.src = r.thumbDataUrl; }
+			}
+			if ((i + 1) % 64 === 0) setStatus(`Loading thumbnails… ${i + 1}/${state.records.length}`);
+		}
+		let generated = 0;
+		for (let i = 0; i < state.records.length; i++) {
+			const r = state.records[i];
+			if (!r.thumbDataUrl) {
+				r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
+				if (r.thumbDataUrl) {
+					await window.api.cacheThumb(state.folderPath, r.id, r.thumbDataUrl);
+					generated++;
+					const card = state.cardByIndex[i]; const img = card && card.querySelector('img'); if (img) img.src = r.thumbDataUrl;
+				}
+			}
+			if ((i + 1) % 32 === 0) setStatus(`Generating thumbnails… ${generated}`);
+		}
+		setStatus(`Loaded ${state.records.length} images (skipped ${skipped})`);
+		renderGrid();
+		if (state.records.length > 0) { renderViewer(); }
+		showGallery();
+	} catch (e) {
+		setStatus(`Error: ${e && e.message ? e.message : 'Failed to open folder'}`);
+	} finally {
+		setLoading(false);
+		readyStatus();
+	}
+}
+
+async function saveCsv() {
+	if (!state.folderPath || isLoading) { setStatus('No folder open'); return; }
+	await window.api.updateCsv(state.folderPath, state.records);
+	setStatus('CSV saved');
+	setTimeout(readyStatus, 800);
+}
+
+// Keyboard
+window.addEventListener('keydown', (e) => {
+	if (e.key === 'Escape') { showGallery(); return; }
+	if (e.key === 'ArrowLeft') { prevImage(); }
+	else if (e.key === 'ArrowRight') { nextImage(); }
+	else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; applyScoreToSelection(r.score === -1 || r.score === 0 ? 5 : -1); }
+	else if (e.key === 'n' || e.key === 'N') { applyScoreToSelection(0); }
+	else if (e.key >= '1' && e.key <= '5') { applyScoreToSelection(parseInt(e.key, 10)); }
+	else if (e.key.toLowerCase() === 'g') { showGallery(); }
+	else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
+});
+
+clearThumbsBtn.addEventListener('click', async () => {
+	if (state.folderPath) { await window.api.clearThumbCache(state.folderPath); setStatus('Thumbnail cache cleared'); }
+});
+
+// Buttons
 openBtn.addEventListener('click', openFolder);
 saveBtn.addEventListener('click', saveCsv);
 galleryBtn.addEventListener('click', showGallery);
 viewerBtn.addEventListener('click', () => { if (state.records.length) { renderViewer(); showViewer(); }});
 
-setStatus('Ready. Click Open Folder.');
+readyStatus();

@@ -4,6 +4,14 @@ const fs = require('fs');
 const fg = require('fast-glob');
 const { exiftool } = require('exiftool-vendored');
 
+// Global error guards to prevent crashes
+process.on('uncaughtException', (err) => {
+	try { console.error('UncaughtException:', err); dialog.showErrorBox('Unexpected error', String(err)); } catch (_) {}
+});
+process.on('unhandledRejection', (reason) => {
+	try { console.error('UnhandledRejection:', reason); dialog.showErrorBox('Unexpected rejection', String(reason)); } catch (_) {}
+});
+
 const RAW_EXTENSIONS = new Set(['.nef', '.arw', '.cr2', '.cr3', '.dng', '.rw2', '.orf', '.raf', '.srw', '.pef', '.erf', '.3fr', '.iiq', '.mos', '.mef', '.nrw']);
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp']);
 for (const e of RAW_EXTENSIONS) IMAGE_EXTENSIONS.add(e);
@@ -53,15 +61,21 @@ function bufferToDataUrl(buffer, mime) { return `data:${mime};base64,${buffer.to
 
 async function loadImageToMemory(filePath) {
 	const extension = extOf(filePath);
-	let fullBuf;
-	let mime;
+	let fullBuf; let mime;
+	const browserSafe = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 	if (RAW_EXTENSIONS.has(extension)) {
 		const preview = await loadRawPreviewBuffer(filePath); // JPEG buffer
-		fullBuf = preview;
-		mime = 'image/jpeg';
+		fullBuf = preview; mime = 'image/jpeg';
+	} else if (!browserSafe.has(extension)) {
+		// Try to extract an embedded preview (often JPEG) for unsupported formats like TIFF
+		try {
+			const preview = await loadRawPreviewBuffer(filePath); // works for many formats too
+			fullBuf = preview; mime = 'image/jpeg';
+		} catch (_) {
+			fullBuf = await fs.promises.readFile(filePath); mime = guessMimeFromExt(extension);
+		}
 	} else {
-		fullBuf = await fs.promises.readFile(filePath);
-		mime = guessMimeFromExt(extension);
+		fullBuf = await fs.promises.readFile(filePath); mime = guessMimeFromExt(extension);
 	}
 	const stats = await fs.promises.stat(filePath);
 	return {
@@ -71,12 +85,11 @@ async function loadImageToMemory(filePath) {
 		ext: extension,
 		size: stats.size,
 		fullDataUrl: bufferToDataUrl(fullBuf, mime),
-		thumbDataUrl: null, // renderer will generate
+		thumbDataUrl: null,
 	};
 }
 
 function csvPath(folderPath) { return path.join(folderPath, CSV_NAME); }
-
 async function ensureCsvExists(folderPath) {
 	const outPath = csvPath(folderPath);
 	try { await fs.promises.access(outPath, fs.constants.F_OK); }
@@ -92,73 +105,73 @@ async function readCsvScores(folderPath) {
 		if (lines.length === 0) return {};
 		const map = {};
 		for (let i = 1; i < lines.length; i++) {
-			const line = lines[i];
-			const parts = line.split(',');
+			const parts = lines[i].split(',');
 			if (parts.length >= 3) {
-				const filename = parts[0];
-				const filePath = parts[1];
-				const scoreStr = parts[2];
-				const key = filePath || filename;
-				const score = parseInt(scoreStr, 10);
-				if (!Number.isNaN(score)) map[key] = score;
-			} else if (parts.length === 5) {
-				// Backward compat: filename,path,liked,rejected,score
-				const filename = parts[0];
-				const filePath = parts[1];
-				const scoreStr = parts[4];
-				const key = filePath || filename;
-				const score = parseInt(scoreStr, 10);
+				const filename = parts[0]; const filePath = parts[1]; const scoreStr = parts[2];
+				const key = filePath || filename; const score = parseInt(scoreStr, 10);
 				if (!Number.isNaN(score)) map[key] = score;
 			}
 		}
 		return map;
-	} catch (_) {
-		return {};
-	}
+	} catch (_) { return {}; }
 }
 
 async function writeCsvScores(folderPath, records) {
 	const outPath = await ensureCsvExists(folderPath);
 	const header = 'filename,path,score\n';
 	const lines = [header];
-	for (const r of records) {
-		const row = [ r.name, r.path, String(r.score ?? -1) ].join(',');
-		lines.push(row + '\n');
-	}
+	for (const r of records) lines.push([ r.name, r.path, String(r.score ?? -1) ].join(',') + '\n');
 	await fs.promises.writeFile(outPath, lines.join(''), 'utf8');
 	return outPath;
+}
+
+function thumbsDir(folderPath) { return path.join(folderPath, '.thumbnails'); }
+async function ensureThumbsDir(folderPath) { await fs.promises.mkdir(thumbsDir(folderPath), { recursive: true }); }
+async function cacheThumb(folderPath, id, dataUrl) {
+	await ensureThumbsDir(folderPath);
+	const b64 = dataUrl.split(',')[1] || '';
+	const buf = Buffer.from(b64, 'base64');
+	const file = path.join(thumbsDir(folderPath), `${id}.jpg`);
+	await fs.promises.writeFile(file, buf);
+	return file;
+}
+async function clearThumbCache(folderPath) {
+	try {
+		const dir = thumbsDir(folderPath);
+		const entries = await fs.promises.readdir(dir);
+		await Promise.all(entries.map(e => fs.promises.rm(path.join(dir, e), { force: true })));
+		return true;
+	} catch (_) { return false; }
+}
+
+async function readThumbAsDataUrl(folderPath, id) {
+	try {
+		const file = path.join(thumbsDir(folderPath), `${id}.jpg`);
+		const buf = await fs.promises.readFile(file);
+		return bufferToDataUrl(buf, 'image/jpeg');
+	} catch (_) { return null; }
 }
 
 async function selectAndLoadFolder(win) {
-	const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'] });
-	if (canceled || !filePaths || filePaths.length === 0) return { folderPath: null, images: [], skipped: 0 };
-	const folderPath = filePaths[0];
-	await ensureCsvExists(folderPath);
-	const files = await scanFolderRecursive(folderPath);
-	const images = [];
-	let skipped = 0;
-	for (const file of files) {
-		try {
-			const record = await loadImageToMemory(file);
-			images.push(record);
-		} catch (e) {
-			skipped++;
-			if (isDev) console.warn('Skipped file', file, e.message);
+	try {
+		const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'] });
+		if (canceled || !filePaths || filePaths.length === 0) return { folderPath: null, images: [], skipped: 0 };
+		const folderPath = filePaths[0];
+		await ensureCsvExists(folderPath);
+		await ensureThumbsDir(folderPath); // make sure .thumbnails exists up front
+		try { await exiftool.version(); } catch (_) {}
+		let files = [];
+		try { files = await scanFolderRecursive(folderPath); }
+		catch (e) { return { error: `Failed to scan folder: ${e.message}` }; }
+		const images = []; let skipped = 0;
+		for (let i = 0; i < files.length; i++) {
+			const file = files[i];
+			try { images.push(await loadImageToMemory(file)); }
+			catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
+			if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
 		}
-	}
-	return { folderPath, images, skipped };
-}
-
-async function saveCsv(folderPath, records) {
-	const outPath = path.join(folderPath, CSV_NAME);
-	const header = 'filename,path,score\n';
-	const lines = [header];
-	for (const r of records) {
-		const row = [ r.name, r.path, String(r.score ?? -1) ].join(',');
-		lines.push(row + '\n');
-	}
-	await fs.promises.writeFile(outPath, lines.join(''), 'utf8');
-	return outPath;
+		return { folderPath, images, skipped };
+	} catch (e) { return { error: e.message }; }
 }
 
 function createWindow() {
@@ -176,7 +189,9 @@ app.whenReady().then(() => {
 	ipcMain.handle('select-folder', async () => { try { return await selectAndLoadFolder(win); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('load-csv', async (_e, folderPath) => { try { await ensureCsvExists(folderPath); return await readCsvScores(folderPath); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('update-csv', async (_e, folderPath, records) => { try { return await writeCsvScores(folderPath, records); } catch (e) { return { error: e.message }; } });
-	ipcMain.handle('save-csv', async (_e, folderPath, records) => { try { return await saveCsv(folderPath, records); } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('get-thumb', async (_e, folderPath, id) => { try { return await readThumbAsDataUrl(folderPath, id); } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('cache-thumb', async (_e, folderPath, id, dataUrl) => { try { return await cacheThumb(folderPath, id, dataUrl); } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('clear-thumb-cache', async (_e, folderPath) => { try { return await clearThumbCache(folderPath); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('reveal-in-finder', async (_e, targetPath) => { try { shell.showItemInFolder(targetPath); return true; } catch (e) { return { error: e.message }; } });
 	app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
