@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Photo Selector</title>
+	<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+	<div id="toolbar">
+		<button id="openBtn">Open Folder</button>
+		<button id="galleryBtn">Gallery</button>
+		<button id="viewerBtn">Viewer</button>
+		<button id="saveBtn">Save CSV</button>
+		<div id="status"></div>
+	</div>
+	<div id="gallery" class="view">
+		<div id="grid"></div>
+	</div>
+	<div id="viewer" class="view hidden">
+		<div id="viewerContainer">
+			<img id="viewerImage" alt="viewer">
+			<div id="viewerMeta"></div>
+		</div>
+	</div>
+	<script src="renderer.js"></script>
+</body>
+</html>
