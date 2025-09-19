@@ -31,34 +31,57 @@ function badgeHtml(score) {
 	return `<span class="badge" style="background:${colors[idx]}; color:#111;">Score ${score}</span>`;
 }
 
+const MAX_PARALLEL = 8;
+let lazyObserver = null;
+
+async function ensureThumb(i) {
+	const r = state.records[i];
+	if (!r) return;
+	if (!r.thumbDataUrl) {
+		const cached = await window.api.getThumb(state.folderPath, r.id);
+		if (cached) r.thumbDataUrl = cached;
+	}
+	if (!r.thumbDataUrl) {
+		r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
+		if (r.thumbDataUrl) await window.api.cacheThumb(state.folderPath, r.id, r.thumbDataUrl);
+	}
+	const card = state.cardByIndex[i];
+	if (card) {
+		const img = card.querySelector('img');
+		if (img) img.src = r.thumbDataUrl || r.fullDataUrl;
+	}
+}
+
+function setupLazyObserver() {
+	if (lazyObserver) { try { lazyObserver.disconnect(); } catch (_) {} }
+	lazyObserver = new IntersectionObserver((entries) => {
+		for (const entry of entries) {
+			if (entry.isIntersecting) {
+				const el = entry.target;
+				const idx = Number(el.dataset.index);
+				ensureThumb(idx);
+				lazyObserver.unobserve(el);
+			}
+		}
+	}, { root: gridEl, rootMargin: '200px', threshold: 0.01 });
+}
+
 function renderGrid() {
 	state.metaById.clear();
 	state.cardByIndex = [];
 	gridEl.innerHTML = '';
+	setupLazyObserver();
 	for (let i = 0; i < state.records.length; i++) {
 		const r = state.records[i];
 		const card = document.createElement('div');
 		card.className = 'card';
 		card.dataset.index = String(i);
 		const img = document.createElement('img');
-		img.src = r.thumbDataUrl || r.fullDataUrl; // fallback to full if thumb missing
+		img.src = r.thumbDataUrl || r.fullDataUrl || '';
 		img.alt = r.name;
 		img.loading = 'lazy';
 		img.addEventListener('error', () => {
-			if (img.src !== r.fullDataUrl) {
-				img.src = r.fullDataUrl;
-			} else {
-				console.warn('Preview not available for', r.path);
-				img.remove();
-				const ph = document.createElement('div');
-				ph.style.height = '160px';
-				ph.style.background = '#2a2a2a';
-				ph.style.display = 'flex';
-				ph.style.alignItems = 'center';
-				ph.style.justifyContent = 'center';
-				ph.textContent = 'No preview';
-				card.prepend(ph);
-			}
+			if (img.src && img.src !== r.fullDataUrl) img.src = r.fullDataUrl; else { img.remove(); const ph = document.createElement('div'); ph.style.height='160px'; ph.style.background='#2a2a2a'; ph.style.display='flex'; ph.style.alignItems='center'; ph.style.justifyContent='center'; ph.textContent='No preview'; card.prepend(ph); }
 		});
 		img.addEventListener('click', (ev) => { handleCardClick(i, ev); });
 		img.addEventListener('dblclick', () => { state.currentIndex = i; renderViewer(); showViewer(); });
@@ -71,6 +94,7 @@ function renderGrid() {
 		card.appendChild(meta);
 		gridEl.appendChild(card);
 		state.cardByIndex.push(card);
+		lazyObserver.observe(card);
 	}
 	updateGridSelection();
 }
@@ -259,33 +283,7 @@ async function openFolder() {
 		state.records = images.map(img => ({ ...img, score: (scoreMap[img.path] ?? -1) }));
 		state.currentIndex = 0;
 		renderGrid();
-		setStatus(`Loading thumbnails… 0/${state.records.length}`);
-		for (let i = 0; i < state.records.length; i++) {
-			const r = state.records[i];
-			const cached = await window.api.getThumb(state.folderPath, r.id);
-			if (cached) {
-				r.thumbDataUrl = cached;
-				const card = state.cardByIndex[i];
-				if (card) { const img = card.querySelector('img'); if (img) img.src = r.thumbDataUrl; }
-			}
-			if ((i + 1) % 64 === 0) setStatus(`Loading thumbnails… ${i + 1}/${state.records.length}`);
-		}
-		let generated = 0;
-		for (let i = 0; i < state.records.length; i++) {
-			const r = state.records[i];
-			if (!r.thumbDataUrl) {
-				r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
-				if (r.thumbDataUrl) {
-					await window.api.cacheThumb(state.folderPath, r.id, r.thumbDataUrl);
-					generated++;
-					const card = state.cardByIndex[i]; const img = card && card.querySelector('img'); if (img) img.src = r.thumbDataUrl;
-				}
-			}
-			if ((i + 1) % 32 === 0) setStatus(`Generating thumbnails… ${generated}`);
-		}
-		setStatus(`Loaded ${state.records.length} images (skipped ${skipped})`);
-		renderGrid();
-		if (state.records.length > 0) { renderViewer(); }
+		setStatus(`Ready • ${state.records.length} images`);
 		showGallery();
 	} catch (e) {
 		setStatus(`Error: ${e && e.message ? e.message : 'Failed to open folder'}`);
