@@ -4,7 +4,7 @@
   "description": "Photo selector desktop app (Electron)",
   "main": "src/main.js",
   "scripts": {
-    "dev": "concurrently \"electron .\"",
+    "dev": "electronmon .",
     "build": "electron-builder --mac --dir",
     "pack": "electron-builder --mac --x64 --arm64"
   },
@@ -27,7 +27,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "electronmon": "^2.0.3"
   },
   "build": {
     "appId": "com.photo.selector",

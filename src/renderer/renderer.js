@@ -3,6 +3,7 @@ const state = {
 	records: [],
 	currentIndex: 0,
 	metaById: new Map(),
+	cardByIndex: [],
 };
 
 const statusEl = document.getElementById('status');
@@ -12,8 +13,9 @@ const galleryEl = document.getElementById('gallery');
 const viewerImageEl = document.getElementById('viewerImage');
 const viewerMetaEl = document.getElementById('viewerMeta');
 
+function isGalleryVisible() { return !galleryEl.classList.contains('hidden'); }
 function setStatus(text) { statusEl.textContent = text; }
-function showGallery() { galleryEl.classList.remove('hidden'); viewerEl.classList.add('hidden'); }
+function showGallery() { galleryEl.classList.remove('hidden'); viewerEl.classList.add('hidden'); updateGridSelection(); }
 function showViewer() { viewerEl.classList.remove('hidden'); galleryEl.classList.add('hidden'); }
 
 function badgeHtml(score) {
@@ -26,11 +28,13 @@ function badgeHtml(score) {
 
 function renderGrid() {
 	state.metaById.clear();
+	state.cardByIndex = [];
 	gridEl.innerHTML = '';
 	for (let i = 0; i < state.records.length; i++) {
 		const r = state.records[i];
 		const card = document.createElement('div');
 		card.className = 'card';
+		card.dataset.index = String(i);
 		const img = document.createElement('img');
 		img.src = r.thumbDataUrl || r.fullDataUrl;
 		img.alt = r.name;
@@ -44,6 +48,17 @@ function renderGrid() {
 		card.appendChild(img);
 		card.appendChild(meta);
 		gridEl.appendChild(card);
+		state.cardByIndex.push(card);
+	}
+	updateGridSelection();
+}
+
+function updateGridSelection() {
+	for (const card of state.cardByIndex) card.classList.remove('selected');
+	const card = state.cardByIndex[state.currentIndex];
+	if (card) {
+		card.classList.add('selected');
+		card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 	}
 }
 
@@ -64,13 +79,27 @@ function updateCardMeta(record) {
 function setScore(score) {
 	const r = state.records[state.currentIndex];
 	r.score = score; // -1 not selected, 0 rejected, 1..5 accepted
-	renderViewer();
-	updateCardMeta(r);
+	if (isGalleryVisible()) {
+		updateCardMeta(r);
+		updateGridSelection();
+	} else {
+		renderViewer();
+		updateCardMeta(r);
+	}
 	scheduleCsvSync();
 }
 
-function prevImage() { if (!state.records.length) return; state.currentIndex = (state.currentIndex - 1 + state.records.length) % state.records.length; renderViewer(); }
-function nextImage() { if (!state.records.length) return; state.currentIndex = (state.currentIndex + 1) % state.records.length; renderViewer(); }
+function prevImage() {
+	if (!state.records.length) return;
+	state.currentIndex = (state.currentIndex - 1 + state.records.length) % state.records.length;
+	if (isGalleryVisible()) updateGridSelection(); else renderViewer();
+}
+
+function nextImage() {
+	if (!state.records.length) return;
+	state.currentIndex = (state.currentIndex + 1) % state.records.length;
+	if (isGalleryVisible()) updateGridSelection(); else renderViewer();
+}
 
 async function generateThumb(dataUrl, maxSize = 400) {
 	return new Promise((resolve) => {
@@ -117,16 +146,11 @@ async function openFolder() {
 		if (!r.thumbDataUrl) r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
 		if ((i + 1) % 32 === 0) {
 			setStatus(`Generating thumbnails… ${i + 1}/${state.records.length}`);
-			// Update only the image src for already-rendered cards
-			requestAnimationFrame(() => {
-				const meta = state.metaById.get(r.id); // force layout update by touching a node
-				if (meta) meta.innerHTML = `${r.name} ${badgeHtml(r.score)}`;
-			});
 		}
 	}
 	setStatus(`Loaded ${state.records.length} images in memory (skipped ${skipped})`);
 	// Final pass to update thumbnails in DOM
-	requestAnimationFrame(() => renderGrid());
+	renderGrid();
 	if (state.records.length > 0) { renderViewer(); }
 	showGallery();
 }
@@ -145,6 +169,7 @@ window.addEventListener('keydown', (e) => {
 	else if (e.key === 'n' || e.key === 'N') { setScore(0); }
 	else if (e.key >= '1' && e.key <= '5') { setScore(parseInt(e.key, 10)); }
 	else if (e.key.toLowerCase() === 'g') { showGallery(); }
+	else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
 });
 
 // Buttons
