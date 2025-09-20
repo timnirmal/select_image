@@ -3,7 +3,7 @@ directories:
   buildResources: build
 appId: com.photo.selector
 asarUnpack:
-  - node_modules/exiftool-vendored/**
+  - node_modules/exiftool-vendored.exe/**
 mac:
   category: public.app-category.photography
   target:
@@ -18,5 +18,7 @@ files:
   - filter:
       - src/**
       - node_modules/**
+      - '!node_modules/exiftool-vendored.pl'
+      - '!node_modules/exiftool-vendored.pl/**'
       - package.json
 electronVersion: 29.4.6

@@ -315,8 +315,7 @@ const openBtn = document.getElementById('openBtn');
 const saveBtn = document.getElementById('saveBtn');
 const galleryBtn = document.getElementById('galleryBtn');
 const viewerBtn = document.getElementById('viewerBtn');
-const addFolderBtn = document.getElementById('addFolderBtn');
-const folderListEl = document.getElementById('folderList');
+const projectsBtn = document.getElementById('projectsBtn');
 const projectListEl = document.getElementById('projectList');
 const addProjectBtn = document.getElementById('addProjectBtn');
 const newProjectNameEl = document.getElementById('newProjectName');
@@ -366,35 +365,68 @@ async function openFolder() {
 // Home: DB rendering
 async function renderHome() {
     const db = await window.api.dbLoad();
-    // Folders
-    folderListEl.innerHTML = '';
-    for (const fp of db.folders || []) {
-        const li = document.createElement('li');
-        li.textContent = fp;
-        const btn = document.createElement('button'); btn.textContent = 'Open'; btn.addEventListener('click', async () => { const res = await window.api.openFolders([fp]); if (res && res.result && res.result[0]) { const r = res.result[0]; const scoreMap = await loadCsvScores(fp); state.folderPath = fp; state.records = (r.images || []).map(img => ({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) })); state.currentIndex = 0; renderGrid(); showGallery(); readyStatus(); } });
-        li.appendChild(btn);
-        folderListEl.appendChild(li);
-    }
-    // Projects
+    // Projects only; folders are scoped to each project
     projectListEl.innerHTML = '';
     for (const p of db.projects || []) {
         const li = document.createElement('li');
-        li.innerHTML = `<span>${p.name}</span>`;
-        const openBtnP = document.createElement('button'); openBtnP.textContent = 'Open All';
-        openBtnP.addEventListener('click', async () => {
-            const res = await window.api.openFolders(p.folders || []);
-            if (!res || !res.result) return;
-            // For simplicity, open first folder now (multi-folder merge can be added later)
-            if (res.result.length > 0) {
-                const first = res.result[0];
-                const fp = first.folderPath;
-                const scoreMap = await loadCsvScores(fp);
-                state.folderPath = fp;
-                state.records = (first.images || []).map(img => ({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) }));
-                state.currentIndex = 0; renderGrid(); showGallery(); readyStatus();
-            }
+        const title = document.createElement('div');
+        title.innerHTML = `<strong>${p.name}</strong>`;
+        li.appendChild(title);
+
+        const foldersUl = document.createElement('ul');
+        for (const fp of (p.folders || [])) {
+            const fli = document.createElement('li');
+            const span = document.createElement('span'); span.textContent = fp;
+            const openBtnF = document.createElement('button'); openBtnF.textContent = 'Open';
+            openBtnF.addEventListener('click', async () => {
+                const res = await window.api.openFolders([fp]);
+                if (res && res.result && res.result[0]) {
+                    const r = res.result[0];
+                    const scoreMap = await loadCsvScores(fp);
+                    state.folderPath = fp;
+                    state.records = (r.images || []).map(img => ({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) }));
+                    state.currentIndex = 0; renderGrid(); showGallery(); readyStatus();
+                }
+            });
+            const revealBtn = document.createElement('button'); revealBtn.textContent = 'Show in Explorer';
+            revealBtn.addEventListener('click', () => { window.api.revealInFinder(fp); });
+            fli.appendChild(span);
+            fli.appendChild(openBtnF);
+            fli.appendChild(revealBtn);
+            foldersUl.appendChild(fli);
+        }
+        li.appendChild(foldersUl);
+
+        const actions = document.createElement('div');
+        const addFolderBtnP = document.createElement('button'); addFolderBtnP.textContent = 'Add Folder…';
+        addFolderBtnP.addEventListener('click', async () => {
+            const res = await window.api.selectFolder();
+            if (res && res.folderPath) { await window.api.dbAddFolderToProject(p.id, res.folderPath); await renderHome(); }
         });
-        li.appendChild(openBtnP);
+        const openAllBtn = document.createElement('button'); openAllBtn.textContent = 'Open All';
+        openAllBtn.addEventListener('click', async () => {
+            const folderPaths = (p.folders || []).slice();
+            if (!folderPaths.length) { setStatus('Project has no folders'); return; }
+            const res = await window.api.openFolders(folderPaths);
+            if (!res || !res.result) { setStatus('Failed to open folders'); return; }
+            const merged = [];
+            for (const r of res.result) {
+                if (!r || !r.folderPath) continue;
+                const scoreMap = await loadCsvScores(r.folderPath);
+                for (const img of (r.images || [])) {
+                    merged.push({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) });
+                }
+            }
+            if (!merged.length) { setStatus('No images found'); return; }
+            state.folderPath = folderPaths[0];
+            state.records = merged;
+            state.currentIndex = 0;
+            renderGrid(); showGallery(); readyStatus();
+        });
+        actions.appendChild(addFolderBtnP);
+        actions.appendChild(openAllBtn);
+        li.appendChild(actions);
+
         projectListEl.appendChild(li);
     }
 }
@@ -414,7 +446,6 @@ window.addEventListener('keydown', (e) => {
     else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; applyScoreToSelection(r.score === -1 || r.score === 0 ? 5 : -1); }
     else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); applyScoreToSelection(0); }
     else if (e.key >= '1' && e.key <= '5') { e.preventDefault(); applyScoreToSelection(parseInt(e.key, 10)); }
-	else if (e.key.toLowerCase() === 'g') { showGallery(); }
     else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
     else if (e.key.toLowerCase() === 'z') { // zoom in
         if (viewerZoomMode === 'fit') viewerZoomMode = 100;
@@ -440,10 +471,7 @@ openBtn.addEventListener('click', openFolder);
 saveBtn.addEventListener('click', saveCsv);
 galleryBtn.addEventListener('click', showGallery);
 viewerBtn.addEventListener('click', () => { if (state.records.length) { renderViewer(); showViewer(); }});
-addFolderBtn && addFolderBtn.addEventListener('click', async () => {
-    const res = await window.api.selectFolder();
-    if (res && res.folderPath) { await window.api.dbAddFolder(res.folderPath); await renderHome(); }
-});
+projectsBtn && projectsBtn.addEventListener('click', () => { showHome(); renderHome(); });
 addProjectBtn && addProjectBtn.addEventListener('click', async () => {
     const name = (newProjectNameEl && newProjectNameEl.value || '').trim();
     if (!name) return; await window.api.dbAddProject(name); newProjectNameEl.value = ''; await renderHome();

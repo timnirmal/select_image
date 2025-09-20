@@ -5,9 +5,10 @@
   "main": "src/main.js",
   "scripts": {
     "dev": "electronmon .",
-    "build": "electron-builder --mac --dir",
-    "pack": "electron-builder --mac --x64 --arm64",
-    "build:win": "electron-builder --win"
+    "build": "electron-builder --mac",
+    "pack": "electron-builder --mac -p never",
+    "prebuild:win": "node scripts/ensure-exiftool-pl.js",
+    "build:win": "npm run prebuild:win && electron-builder --win"
   },
   "repository": {
     "type": "git",
@@ -21,6 +22,12 @@
     "url": "https://github.com/timnirmal/select_image/issues"
   },
   "homepage": "https://github.com/timnirmal/select_image#readme",
+  "electronmon": {
+    "patterns": [
+      "!dist/**",
+      "!node_modules/**"
+    ]
+  },
   "dependencies": {
     "exiftool-vendored": "^30.5.0",
     "fast-glob": "^3.3.3"
@@ -34,7 +41,7 @@
   "build": {
     "appId": "com.photo.selector",
     "asarUnpack": [
-      "node_modules/exiftool-vendored/**"
+      "node_modules/exiftool-vendored.exe/**"
     ],
     "mac": {
       "category": "public.app-category.photography",

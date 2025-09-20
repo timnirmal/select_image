@@ -19,6 +19,8 @@ for (const e of RAW_EXTENSIONS) IMAGE_EXTENSIONS.add(e);
 const isDev = process.env.NODE_ENV !== 'production';
 const CSV_NAME = 'image_selections.csv';
 const DB_NAME = 'photo_selector_db.json';
+const DEFAULT_PROJECT_ID = 'default';
+const DEFAULT_PROJECT_NAME = 'Default';
 
 function normalizeSlashes(p) { return String(p || '').replace(/\\/g, '/'); }
 
@@ -96,9 +98,30 @@ async function loadImageToMemory(filePath, rootFolder = null) {
 
 function csvPath(folderPath) { return path.join(folderPath, CSV_NAME); }
 function appDbPath() { return path.join(app.getPath('userData'), DB_NAME); }
+function ensureDbDefaults(db) {
+    if (!db || typeof db !== 'object') db = { projects: [], folders: [] };
+    if (!Array.isArray(db.projects)) db.projects = [];
+    if (!Array.isArray(db.folders)) db.folders = [];
+    let changed = false;
+    let def = db.projects.find(p => p.id === DEFAULT_PROJECT_ID);
+    if (!def) { def = { id: DEFAULT_PROJECT_ID, name: DEFAULT_PROJECT_NAME, folders: [] }; db.projects.unshift(def); changed = true; }
+    for (const fp of db.folders) { if (!def.folders.includes(fp)) { def.folders.push(fp); changed = true; } }
+    return { db, changed };
+}
+
 async function loadDb() {
-    try { const p = appDbPath(); const s = await fs.promises.readFile(p, 'utf8'); return JSON.parse(s); }
-    catch (_) { return { projects: [], folders: [] }; }
+    try {
+        const p = appDbPath();
+        const s = await fs.promises.readFile(p, 'utf8');
+        let db = JSON.parse(s);
+        const ensured = ensureDbDefaults(db);
+        if (ensured.changed) { await saveDb(ensured.db); }
+        return ensured.db;
+    } catch (_) {
+        const ensured = ensureDbDefaults({ projects: [], folders: [] });
+        try { await saveDb(ensured.db); } catch (_) {}
+        return ensured.db;
+    }
 }
 async function saveDb(db) { const p = appDbPath(); await fs.promises.mkdir(path.dirname(p), { recursive: true }); await fs.promises.writeFile(p, JSON.stringify(db, null, 2), 'utf8'); return true; }
 async function ensureCsvExists(folderPath) {
@@ -246,7 +269,7 @@ app.whenReady().then(() => {
 	ipcMain.handle('reveal-in-finder', async (_e, targetPath) => { try { shell.showItemInFolder(targetPath); return true; } catch (e) { return { error: e.message }; } });
     // Home/Projects handlers
     ipcMain.handle('db-load', async () => { try { return await loadDb(); } catch (e) { return { error: e.message }; } });
-    ipcMain.handle('db-add-folder', async (_e, folderPath) => { try { const db = await loadDb(); if (!db.folders.includes(folderPath)) db.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-folder', async (_e, folderPath) => { try { const db = await loadDb(); if (!db.folders.includes(folderPath)) db.folders.push(folderPath); const def = db.projects.find(p => p.id === DEFAULT_PROJECT_ID) || db.projects[0]; if (def && !def.folders.includes(folderPath)) def.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
     ipcMain.handle('db-add-project', async (_e, name) => { try { const db = await loadDb(); const id = Date.now().toString(36); db.projects.push({ id, name, folders: [] }); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
     ipcMain.handle('db-add-folder-to-project', async (_e, projectId, folderPath) => { try { const db = await loadDb(); const p = db.projects.find(p => p.id === projectId); if (p && !p.folders.includes(folderPath)) p.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
     ipcMain.handle('open-folders', async (_e, folderPaths) => { try { return await openMultipleFolders(win, folderPaths || []); } catch (e) { return { error: e.message }; } });
