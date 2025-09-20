@@ -10,22 +10,59 @@
 <body>
 	<div id="home" class="view">
 		<div id="homeContent">
-			<div class="homeSection">
-				<h3>Projects</h3>
-				<ul id="projectList"></ul>
-				<div class="homeActions">
-					<input id="newProjectName" placeholder="New project name"/>
-					<button id="addProjectBtn">Add Project</button>
+			<div class="home-header">
+				<h2>Your Projects</h2>
+				<p>Organize and manage your photo collections</p>
+				<div class="home-actions">
+					<div class="new-project-form">
+						<input id="newProjectName" placeholder="Enter project name..." />
+						<button id="addProjectBtn" class="primary">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M12 5v14M5 12h14"/>
+							</svg>
+							Create Project
+						</button>
+					</div>
 				</div>
 			</div>
+			<div id="projectGrid" class="project-grid"></div>
 		</div>
 	</div>
 	<div id="toolbar">
-		<button id="openBtn">Open Folder</button>
-		<button id="galleryBtn">Gallery</button>
-		<button id="viewerBtn">Viewer</button>
-		<button id="projectsBtn">Projects</button>
-		<button id="saveBtn">Save CSV</button>
+		<button id="openBtn" title="Open Folder (Ctrl+O)">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+			</svg>
+			Open Folder
+		</button>
+		<button id="galleryBtn" title="Gallery View (G)">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+			</svg>
+			Gallery
+		</button>
+		<button id="viewerBtn" title="Viewer Mode (V)">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+			</svg>
+			Viewer
+		</button>
+		<button id="projectsBtn" title="Projects (P)">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+				<path d="M12 11v6"/><path d="m9 14 3-3 3 3"/>
+			</svg>
+			Projects
+		</button>
+		<div class="toolbar-separator"></div>
+		<button id="saveBtn" title="Save CSV (Ctrl+S)">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+				<polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/>
+			</svg>
+			Save CSV
+		</button>
+		<div class="toolbar-separator"></div>
 		<select id="zoomSelect">
 			<option value="fit">Fit</option>
 			<option value="50">50%</option>
@@ -41,9 +78,60 @@
 			<label for="gridSlider">Grid</label>
 			<input id="gridSlider" type="range" min="120" max="400" step="10" value="200">
 		</div>
-		<button id="clearThumbsBtn">Clear Thumbs</button>
+		<button id="clearThumbsBtn" title="Clear Thumbnail Cache">
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c0 1 1 2 2 2v2"/>
+			</svg>
+			Clear Thumbs
+		</button>
+		<div class="toolbar-separator"></div>
 		<div id="status"></div>
 	</div>
+	<!-- Toast Notifications Container -->
+	<div id="toastContainer"></div>
+	
+	<!-- Keyboard Help Overlay -->
+	<div id="keyboardHelp" class="modal hidden">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3>Keyboard Shortcuts</h3>
+				<button id="closeKeyboardHelp" class="modal-close">×</button>
+			</div>
+			<div class="modal-body">
+				<div class="shortcut-grid">
+					<div class="shortcut-group">
+						<h4>Navigation</h4>
+						<div class="shortcut"><kbd>←</kbd><kbd>→</kbd><span>Navigate photos</span></div>
+						<div class="shortcut"><kbd>G</kbd><span>Gallery view</span></div>
+						<div class="shortcut"><kbd>V</kbd><span>Viewer mode</span></div>
+						<div class="shortcut"><kbd>P</kbd><span>Projects</span></div>
+						<div class="shortcut"><kbd>Enter</kbd><span>Open viewer from gallery</span></div>
+						<div class="shortcut"><kbd>Esc</kbd><span>Back to gallery</span></div>
+					</div>
+					<div class="shortcut-group">
+						<h4>Scoring</h4>
+						<div class="shortcut"><kbd>Space</kbd><span>Like/Unlike (Score 5)</span></div>
+						<div class="shortcut"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd><kbd>5</kbd><span>Set score</span></div>
+						<div class="shortcut"><kbd>N</kbd><span>Reject (Score 0)</span></div>
+					</div>
+					<div class="shortcut-group">
+						<h4>Viewer</h4>
+						<div class="shortcut"><kbd>Z</kbd><span>Zoom in</span></div>
+						<div class="shortcut"><kbd>X</kbd><span>Zoom out</span></div>
+						<div class="shortcut"><kbd>Ctrl</kbd><kbd>Wheel</kbd><span>Zoom to cursor</span></div>
+						<div class="shortcut"><kbd>Double-click</kbd><span>Reset zoom</span></div>
+					</div>
+					<div class="shortcut-group">
+						<h4>File Operations</h4>
+						<div class="shortcut"><kbd>Ctrl</kbd><kbd>O</kbd><span>Open folder</span></div>
+						<div class="shortcut"><kbd>Ctrl</kbd><kbd>S</kbd><span>Save CSV</span></div>
+						<div class="shortcut"><kbd>?</kbd><span>Show this help</span></div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
 	<div id="gallery" class="view">
 		<div id="grid"></div>
 	</div>

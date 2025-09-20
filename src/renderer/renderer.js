@@ -21,7 +21,43 @@ const zoomSlider = document.getElementById('zoomSlider');
 const zoomLabel = document.getElementById('zoomLabel');
 const gridSlider = document.getElementById('gridSlider');
 const clearThumbsBtn = document.getElementById('clearThumbsBtn');
+const keyboardHelpEl = document.getElementById('keyboardHelp');
+const closeKeyboardHelpBtn = document.getElementById('closeKeyboardHelp');
+const toastContainer = document.getElementById('toastContainer');
 let viewerZoomMode = 'fit'; // 'fit' or numeric percent
+
+// Toast notification system
+function showToast(message, type = 'info', duration = 3000) {
+	const toast = document.createElement('div');
+	toast.className = `toast ${type}`;
+	toast.textContent = message;
+	
+	toastContainer.appendChild(toast);
+	
+	// Trigger animation
+	requestAnimationFrame(() => {
+		toast.classList.add('show');
+	});
+	
+	// Auto remove
+	setTimeout(() => {
+		toast.classList.remove('show');
+		setTimeout(() => {
+			if (toast.parentNode) {
+				toast.parentNode.removeChild(toast);
+			}
+		}, 300);
+	}, duration);
+}
+
+// Keyboard help modal
+function showKeyboardHelp() {
+	keyboardHelpEl.classList.remove('hidden');
+}
+
+function hideKeyboardHelp() {
+	keyboardHelpEl.classList.add('hidden');
+}
 
 function isGalleryVisible() { return !galleryEl.classList.contains('hidden'); }
 function setStatus(text) { statusEl.textContent = text; }
@@ -250,6 +286,7 @@ function scheduleCsvSync() {
 	csvSyncTimer = setTimeout(async () => {
 		await window.api.updateCsv(state.folderPath, state.records);
 		setStatus('Changes saved');
+		showToast('Changes saved', 'success', 2000);
 	}, 400);
 }
 
@@ -316,7 +353,7 @@ const saveBtn = document.getElementById('saveBtn');
 const galleryBtn = document.getElementById('galleryBtn');
 const viewerBtn = document.getElementById('viewerBtn');
 const projectsBtn = document.getElementById('projectsBtn');
-const projectListEl = document.getElementById('projectList');
+const projectGridEl = document.getElementById('projectGrid');
 const addProjectBtn = document.getElementById('addProjectBtn');
 const newProjectNameEl = document.getElementById('newProjectName');
 
@@ -341,9 +378,16 @@ async function openFolder() {
 	let folderPath = null;
 	try {
 		const res = await window.api.selectFolder();
-		if (!res || res.error) { setStatus(res && res.error ? `Error: ${res.error}` : 'Selection failed'); return; }
+		if (!res || res.error) { 
+			setStatus(res && res.error ? `Error: ${res.error}` : 'Selection failed'); 
+			showToast(res && res.error ? res.error : 'Selection failed', 'error');
+			return; 
+		}
 		folderPath = res.folderPath;
-		if (!folderPath) { setStatus('Selection canceled'); return; }
+		if (!folderPath) { 
+			setStatus('Selection canceled'); 
+			return; 
+		}
 		const images = res.images || [];
 		const skipped = res.skipped || 0;
 		state.folderPath = folderPath;
@@ -354,8 +398,11 @@ async function openFolder() {
 		renderGrid();
 		setStatus(`Ready • ${state.records.length} images`);
 		showGallery();
+		showToast(`Loaded ${state.records.length} images${skipped ? ` (${skipped} skipped)` : ''}`, 'success');
 	} catch (e) {
-		setStatus(`Error: ${e && e.message ? e.message : 'Failed to open folder'}`);
+		const errorMsg = `Error: ${e && e.message ? e.message : 'Failed to open folder'}`;
+		setStatus(errorMsg);
+		showToast(errorMsg, 'error');
 	} finally {
 		setLoading(false);
 		readyStatus();
@@ -365,61 +412,126 @@ async function openFolder() {
 // Home: DB rendering
 async function renderHome() {
     const db = await window.api.dbLoad();
-    // Projects only; folders are scoped to each project
-    projectListEl.innerHTML = '';
-    for (const p of db.projects || []) {
-        const li = document.createElement('li');
-        const title = document.createElement('div');
-        const nameEl = document.createElement('input');
-        nameEl.type = 'text';
-        nameEl.value = p.name || '';
-        nameEl.title = 'Project name';
-        nameEl.style.minWidth = '220px';
-        nameEl.addEventListener('change', async () => {
-            const newName = (nameEl.value || '').trim();
-            if (!newName) return;
-            await window.api.dbRenameProject(p.id, newName);
-            await renderHome();
-        });
-        title.appendChild(nameEl);
-        li.appendChild(title);
-
-        const foldersUl = document.createElement('ul');
+    projectGridEl.innerHTML = '';
+    
+    if (!db.projects || db.projects.length === 0) {
+        // Empty state
+        const emptyState = document.createElement('div');
+        emptyState.className = 'empty-state';
+        emptyState.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <h3>No projects yet</h3>
+            <p>Create your first project to organize your photo collections</p>
+        `;
+        projectGridEl.appendChild(emptyState);
+        return;
+    }
+    
+    for (const p of db.projects) {
+        const card = document.createElement('div');
+        card.className = 'project-card';
+        
+        // Calculate stats
+        const folderCount = (p.folders || []).length;
+        const projectInitial = (p.name || 'P')[0].toUpperCase();
+        
+        card.innerHTML = `
+            <div class="project-header">
+                <div class="project-icon">${projectInitial}</div>
+                <div class="project-title">
+                    <input class="project-name-input" type="text" value="${p.name || ''}" data-project-id="${p.id}">
+                </div>
+            </div>
+            
+            <div class="project-stats">
+                <div class="stat-item">
+                    <span class="stat-value">${folderCount}</span>
+                    <span class="stat-label">Folders</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">0</span>
+                    <span class="stat-label">Images</span>
+                </div>
+            </div>
+            
+            <div class="project-folders">
+                <h4>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Folders
+                </h4>
+                <div class="folder-list"></div>
+            </div>
+            
+            <div class="project-actions">
+                <button class="add-folder-btn primary" data-project-id="${p.id}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    Add Folder
+                </button>
+                <button class="open-all-btn" data-project-id="${p.id}" ${folderCount === 0 ? 'disabled' : ''}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                    Open All
+                </button>
+            </div>
+        `;
+        
+        // Populate folder list
+        const folderList = card.querySelector('.folder-list');
         for (const fp of (p.folders || [])) {
-            const fli = document.createElement('li');
-            const span = document.createElement('span'); span.textContent = fp;
-            const openBtnF = document.createElement('button'); openBtnF.textContent = 'Open';
-            openBtnF.addEventListener('click', async () => {
-                const res = await window.api.openFolders([fp]);
-                if (res && res.result && res.result[0]) {
-                    const r = res.result[0];
-                    const scoreMap = await loadCsvScores(fp);
-                    state.folderPath = fp;
-                    state.records = (r.images || []).map(img => ({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) }));
-                    state.currentIndex = 0; renderGrid(); showGallery(); readyStatus();
-                }
-            });
-            const revealBtn = document.createElement('button'); revealBtn.className = 'ghost'; revealBtn.textContent = 'Show in Explorer';
-            revealBtn.addEventListener('click', () => { window.api.revealInFinder(fp); });
-            fli.appendChild(span);
-            fli.appendChild(openBtnF);
-            fli.appendChild(revealBtn);
-            foldersUl.appendChild(fli);
+            const folderItem = document.createElement('div');
+            folderItem.className = 'folder-item';
+            folderItem.innerHTML = `
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span class="folder-path" title="${fp}">${fp}</span>
+                <div class="folder-actions">
+                    <button class="open-folder-btn ghost" data-folder-path="${fp}">Open</button>
+                    <button class="reveal-folder-btn ghost" data-folder-path="${fp}">Show</button>
+                </div>
+            `;
+            folderList.appendChild(folderItem);
         }
-        li.appendChild(foldersUl);
-
-        const actions = document.createElement('div');
-        const addFolderBtnP = document.createElement('button'); addFolderBtnP.className = 'primary'; addFolderBtnP.textContent = 'Add Folder…';
-        addFolderBtnP.addEventListener('click', async () => {
+        
+        projectGridEl.appendChild(card);
+    }
+    
+    // Add event listeners
+    projectGridEl.addEventListener('change', async (e) => {
+        if (e.target.classList.contains('project-name-input')) {
+            const projectId = e.target.dataset.projectId;
+            const newName = e.target.value.trim();
+            if (newName) {
+                await window.api.dbRenameProject(projectId, newName);
+                showToast('Project renamed', 'success', 1500);
+            }
+        }
+    });
+    
+    projectGridEl.addEventListener('click', async (e) => {
+        if (e.target.classList.contains('add-folder-btn')) {
+            const projectId = e.target.dataset.projectId;
             const res = await window.api.selectFolder();
-            if (res && res.folderPath) { await window.api.dbAddFolderToProject(p.id, res.folderPath); await renderHome(); }
-        });
-        const openAllBtn = document.createElement('button'); openAllBtn.textContent = 'Open All';
-        openAllBtn.addEventListener('click', async () => {
-            const folderPaths = (p.folders || []).slice();
-            if (!folderPaths.length) { setStatus('Project has no folders'); return; }
-            const res = await window.api.openFolders(folderPaths);
-            if (!res || !res.result) { setStatus('Failed to open folders'); return; }
+            if (res && res.folderPath) {
+                await window.api.dbAddFolderToProject(projectId, res.folderPath);
+                await renderHome();
+                showToast('Folder added to project', 'success', 2000);
+            }
+        } else if (e.target.classList.contains('open-all-btn')) {
+            const projectId = e.target.dataset.projectId;
+            const project = db.projects.find(p => p.id === projectId);
+            if (!project || !project.folders.length) return;
+            
+            const res = await window.api.openFolders(project.folders);
+            if (!res || !res.result) { showToast('Failed to open folders', 'error'); return; }
+            
             const merged = [];
             for (const r of res.result) {
                 if (!r || !r.folderPath) continue;
@@ -428,35 +540,100 @@ async function renderHome() {
                     merged.push({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) });
                 }
             }
-            if (!merged.length) { setStatus('No images found'); return; }
-            state.folderPath = folderPaths[0];
+            
+            if (!merged.length) { showToast('No images found', 'info'); return; }
+            state.folderPath = project.folders[0];
             state.records = merged;
             state.currentIndex = 0;
             renderGrid(); showGallery(); readyStatus();
-        });
-        actions.appendChild(addFolderBtnP);
-        actions.appendChild(openAllBtn);
-        li.appendChild(actions);
-
-        projectListEl.appendChild(li);
-    }
+            showToast(`Loaded ${merged.length} images from ${project.folders.length} folders`, 'success');
+        } else if (e.target.classList.contains('open-folder-btn')) {
+            const folderPath = e.target.dataset.folderPath;
+            const res = await window.api.openFolders([folderPath]);
+            if (res && res.result && res.result[0]) {
+                const r = res.result[0];
+                const scoreMap = await loadCsvScores(folderPath);
+                state.folderPath = folderPath;
+                state.records = (r.images || []).map(img => ({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) }));
+                state.currentIndex = 0;
+                renderGrid(); showGallery(); readyStatus();
+                showToast(`Loaded ${state.records.length} images`, 'success');
+            }
+        } else if (e.target.classList.contains('reveal-folder-btn')) {
+            const folderPath = e.target.dataset.folderPath;
+            window.api.revealInFinder(folderPath);
+        }
+    });
 }
 
 async function saveCsv() {
-	if (!state.folderPath || isLoading) { setStatus('No folder open'); return; }
-	await window.api.updateCsv(state.folderPath, state.records);
-	setStatus('CSV saved');
-	setTimeout(readyStatus, 800);
+	if (!state.folderPath || isLoading) { 
+		setStatus('No folder open'); 
+		showToast('No folder open', 'error');
+		return; 
+	}
+	try {
+		await window.api.updateCsv(state.folderPath, state.records);
+		setStatus('CSV saved');
+		showToast('CSV saved successfully', 'success');
+		setTimeout(readyStatus, 800);
+	} catch (e) {
+		const errorMsg = `Failed to save CSV: ${e.message}`;
+		setStatus(errorMsg);
+		showToast(errorMsg, 'error');
+	}
+}
+
+// Check if user is currently typing in an input field
+function isTypingInInput() {
+	const activeElement = document.activeElement;
+	if (!activeElement) return false;
+	
+	const tagName = activeElement.tagName.toLowerCase();
+	const inputTypes = ['input', 'textarea', 'select'];
+	const editableContent = activeElement.contentEditable === 'true';
+	
+	return inputTypes.includes(tagName) || editableContent;
 }
 
 // Keyboard
 window.addEventListener('keydown', (e) => {
+	// Handle modal keyboard events first
+	if (!keyboardHelpEl.classList.contains('hidden')) {
+		if (e.key === 'Escape') { hideKeyboardHelp(); return; }
+		return;
+	}
+	
+	// Always allow global shortcuts with modifier keys, even in input fields
+	if ((e.ctrlKey || e.metaKey) && e.key === 'o') { e.preventDefault(); openFolder(); return; }
+	if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCsv(); return; }
+	
+	// Don't trigger shortcuts when user is typing in input fields
+	if (isTypingInInput()) {
+		// Only allow Escape to work in input fields (to blur/cancel)
+		if (e.key === 'Escape') { 
+			document.activeElement.blur(); 
+			showGallery(); 
+			return; 
+		}
+		return; // Let the input field handle all other keys
+	}
+	
+	// Help shortcut (only when not typing)
+	if (e.key === '?' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); showKeyboardHelp(); return; }
+	
+	// Navigation shortcuts
 	if (e.key === 'Escape') { showGallery(); return; }
+	if (e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.metaKey) { showGallery(); return; }
+	if (e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey) { if (state.records.length) { renderViewer(); showViewer(); } return; }
+	if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey) { showHome(); renderHome(); return; }
+	
+	// Image navigation and scoring
 	if (e.key === 'ArrowLeft') { prevImage(); }
 	else if (e.key === 'ArrowRight') { nextImage(); }
     else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; applyScoreToSelection(r.score === -1 || r.score === 0 ? 5 : -1); }
-    else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); applyScoreToSelection(0); }
-    else if (e.key >= '1' && e.key <= '5') { e.preventDefault(); applyScoreToSelection(parseInt(e.key, 10)); }
+    else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); applyScoreToSelection(0); showToast('Image rejected', 'info', 1500); }
+    else if (e.key >= '1' && e.key <= '5') { e.preventDefault(); const score = parseInt(e.key, 10); applyScoreToSelection(score); showToast(`Score set to ${score}`, 'success', 1500); }
     else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
     else if (e.key.toLowerCase() === 'z') { // zoom in
         if (viewerZoomMode === 'fit') viewerZoomMode = 100;
@@ -474,7 +651,17 @@ window.addEventListener('keydown', (e) => {
 });
 
 clearThumbsBtn.addEventListener('click', async () => {
-	if (state.folderPath) { await window.api.clearThumbCache(state.folderPath); setStatus('Thumbnail cache cleared'); }
+	if (state.folderPath) { 
+		await window.api.clearThumbCache(state.folderPath); 
+		setStatus('Thumbnail cache cleared'); 
+		showToast('Thumbnail cache cleared', 'info', 2000);
+	}
+});
+
+// Modal event listeners
+closeKeyboardHelpBtn.addEventListener('click', hideKeyboardHelp);
+keyboardHelpEl.addEventListener('click', (e) => {
+	if (e.target === keyboardHelpEl) hideKeyboardHelp();
 });
 
 // Buttons
@@ -485,7 +672,11 @@ viewerBtn.addEventListener('click', () => { if (state.records.length) { renderVi
 projectsBtn && projectsBtn.addEventListener('click', () => { showHome(); renderHome(); });
 addProjectBtn && addProjectBtn.addEventListener('click', async () => {
     const name = (newProjectNameEl && newProjectNameEl.value || '').trim();
-    if (!name) return; await window.api.dbAddProject(name); newProjectNameEl.value = ''; await renderHome();
+    if (!name) return; 
+    await window.api.dbAddProject(name); 
+    newProjectNameEl.value = ''; 
+    await renderHome();
+    showToast(`Project "${name}" created`, 'success', 2000);
 });
 
 readyStatus();
