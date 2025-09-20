@@ -18,13 +18,14 @@ const viewerMetaEl = document.getElementById('viewerMeta');
 const zoomSelect = document.getElementById('zoomSelect');
 const zoomSlider = document.getElementById('zoomSlider');
 const zoomLabel = document.getElementById('zoomLabel');
+const gridSlider = document.getElementById('gridSlider');
 const clearThumbsBtn = document.getElementById('clearThumbsBtn');
 let viewerZoomMode = 'fit'; // 'fit' or numeric percent
 
 function isGalleryVisible() { return !galleryEl.classList.contains('hidden'); }
 function setStatus(text) { statusEl.textContent = text; }
-function showGallery() { galleryEl.classList.remove('hidden'); viewerEl.classList.add('hidden'); updateGridSelection(); }
-function showViewer() { viewerEl.classList.remove('hidden'); galleryEl.classList.add('hidden'); }
+function showGallery() { galleryEl.classList.remove('hidden'); viewerEl.classList.add('hidden'); document.body.classList.add('mode-gallery'); document.body.classList.remove('mode-viewer'); updateGridSelection(); }
+function showViewer() { viewerEl.classList.remove('hidden'); galleryEl.classList.add('hidden'); document.body.classList.add('mode-viewer'); document.body.classList.remove('mode-gallery'); }
 
 function badgeHtml(score) {
 	if (score === -1) return '';
@@ -124,12 +125,13 @@ function updateGridSelection() {
 function handleCardClick(i, event) {
 	const isShift = event.shiftKey;
 	const isToggle = event.metaKey || event.ctrlKey;
-	if (isShift && state.anchorIndex != null) {
-		state.selectedIndices.clear();
-		const [a, b] = [state.anchorIndex, i].sort((x, y) => x - y);
-		for (let k = a; k <= b; k++) state.selectedIndices.add(k);
-		state.currentIndex = i;
-	} else if (isToggle) {
+    if (isShift) {
+        const anchor = state.anchorIndex != null ? state.anchorIndex : state.currentIndex;
+        state.selectedIndices.clear();
+        const [a, b] = [anchor, i].sort((x, y) => x - y);
+        for (let k = a; k <= b; k++) state.selectedIndices.add(k);
+        state.currentIndex = i;
+    } else if (isToggle) {
 		if (state.selectedIndices.has(i)) state.selectedIndices.delete(i); else state.selectedIndices.add(i);
 		state.anchorIndex = i;
 		state.currentIndex = i;
@@ -276,6 +278,29 @@ if (zoomSlider) {
     });
 }
 
+// Gallery grid size control
+function applyGridSize(px) {
+    const size = Math.max(120, Math.min(400, Math.round(px)));
+    document.documentElement.style.setProperty('--thumb-size', size + 'px');
+}
+if (gridSlider) {
+    applyGridSize(Number(gridSlider.value));
+    gridSlider.addEventListener('input', () => {
+        applyGridSize(Number(gridSlider.value));
+    });
+}
+
+// Ctrl+wheel in gallery adjusts grid size
+galleryEl.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const current = Number(getComputedStyle(document.documentElement).getPropertyValue('--thumb-size').replace('px','')) || 200;
+    const step = 10;
+    const next = current + (e.deltaY < 0 ? step : -step);
+    applyGridSize(next);
+    if (gridSlider) gridSlider.value = String(Math.max(120, Math.min(400, next)));
+}, { passive: false });
+
 const openBtn = document.getElementById('openBtn');
 const saveBtn = document.getElementById('saveBtn');
 const galleryBtn = document.getElementById('galleryBtn');
@@ -311,6 +336,7 @@ async function openFolder() {
 		const scoreMap = await loadCsvScores(folderPath);
 		state.records = images.map(img => ({ ...img, score: (scoreMap[img.path] ?? -1) }));
 		state.currentIndex = 0;
+        state.anchorIndex = 0;
 		renderGrid();
 		setStatus(`Ready • ${state.records.length} images`);
 		showGallery();
@@ -334,18 +360,20 @@ window.addEventListener('keydown', (e) => {
 	if (e.key === 'Escape') { showGallery(); return; }
 	if (e.key === 'ArrowLeft') { prevImage(); }
 	else if (e.key === 'ArrowRight') { nextImage(); }
-	else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; applyScoreToSelection(r.score === -1 || r.score === 0 ? 5 : -1); }
-	else if (e.key === 'n' || e.key === 'N') { applyScoreToSelection(0); }
-	else if (e.key >= '1' && e.key <= '5') { applyScoreToSelection(parseInt(e.key, 10)); }
+    else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; applyScoreToSelection(r.score === -1 || r.score === 0 ? 5 : -1); }
+    else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); applyScoreToSelection(0); }
+    else if (e.key >= '1' && e.key <= '5') { e.preventDefault(); applyScoreToSelection(parseInt(e.key, 10)); }
 	else if (e.key.toLowerCase() === 'g') { showGallery(); }
     else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
     else if (e.key.toLowerCase() === 'z') { // zoom in
         if (viewerZoomMode === 'fit') viewerZoomMode = 100;
+        e.preventDefault();
         viewerZoomMode = Math.min(800, Number(viewerZoomMode) + 10);
         zoomSelect.value = String(viewerZoomMode);
         applyViewerZoom();
     } else if (e.key.toLowerCase() === 'x') { // zoom out
         if (viewerZoomMode === 'fit') viewerZoomMode = 100;
+        e.preventDefault();
         viewerZoomMode = Math.max(10, Number(viewerZoomMode) - 10);
         if (viewerZoomMode === 100) zoomSelect.value = '100';
         applyViewerZoom();
@@ -363,6 +391,8 @@ galleryBtn.addEventListener('click', showGallery);
 viewerBtn.addEventListener('click', () => { if (state.records.length) { renderViewer(); showViewer(); }});
 
 readyStatus();
+// Set initial mode
+document.body.classList.add('mode-gallery');
 
 // --- Panning via mouse drag when zoomed ---
 let isDragging = false;
