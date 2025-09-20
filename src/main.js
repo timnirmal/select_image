@@ -19,6 +19,8 @@ for (const e of RAW_EXTENSIONS) IMAGE_EXTENSIONS.add(e);
 const isDev = process.env.NODE_ENV !== 'production';
 const CSV_NAME = 'image_selections.csv';
 
+function normalizeSlashes(p) { return String(p || '').replace(/\\/g, '/'); }
+
 async function loadRawPreviewBuffer(filePath) {
 	const tags = ['JpgFromRaw', 'PreviewImage', 'ThumbnailImage'];
 	for (const tag of tags) {
@@ -59,7 +61,7 @@ function guessMimeFromExt(ext) {
 
 function bufferToDataUrl(buffer, mime) { return `data:${mime};base64,${buffer.toString('base64')}`; }
 
-async function loadImageToMemory(filePath) {
+async function loadImageToMemory(filePath, rootFolder = null) {
 	const extension = extOf(filePath);
 	let fullBuf; let mime;
 	const browserSafe = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -77,11 +79,13 @@ async function loadImageToMemory(filePath) {
 	} else {
 		fullBuf = await fs.promises.readFile(filePath); mime = guessMimeFromExt(extension);
 	}
-	const stats = await fs.promises.stat(filePath);
+    const stats = await fs.promises.stat(filePath);
+    const rel = rootFolder ? normalizeSlashes(path.relative(rootFolder, filePath)) : null;
 	return {
 		id: `${stats.ino}-${stats.mtimeMs}-${stats.size}`,
 		name: path.basename(filePath),
 		path: filePath,
+        relPath: rel,
 		ext: extension,
 		size: stats.size,
 		fullDataUrl: bufferToDataUrl(fullBuf, mime),
@@ -107,9 +111,22 @@ async function readCsvScores(folderPath) {
 		for (let i = 1; i < lines.length; i++) {
 			const parts = lines[i].split(',');
 			if (parts.length >= 3) {
-				const filename = parts[0]; const filePath = parts[1]; const scoreStr = parts[2];
-				const key = filePath || filename; const score = parseInt(scoreStr, 10);
-				if (!Number.isNaN(score)) map[key] = score;
+                const filename = (parts[0] || '').trim();
+                const rawPath = (parts[1] || '').trim();
+                const scoreStr = parts[2];
+                const score = parseInt(scoreStr, 10);
+                if (Number.isNaN(score)) continue;
+                const normalized = normalizeSlashes(rawPath);
+                if (normalized) {
+                    map[normalized] = score;
+                    // If CSV path is relative, also map absolute under current folder
+                    if (!path.isAbsolute(rawPath)) {
+                        const abs = normalizeSlashes(path.join(folderPath, rawPath));
+                        map[abs] = score;
+                    }
+                }
+                const base = (normalized ? path.basename(normalized) : filename) || '';
+                if (base) map[base] = score;
 			}
 		}
 		return map;
@@ -120,7 +137,11 @@ async function writeCsvScores(folderPath, records) {
 	const outPath = await ensureCsvExists(folderPath);
 	const header = 'filename,path,score\n';
 	const lines = [header];
-	for (const r of records) lines.push([ r.name, r.path, String(r.score ?? -1) ].join(',') + '\n');
+    for (const r of records) {
+        const rel = r.relPath || normalizeSlashes(path.relative(folderPath, r.path || ''));
+        const pathForCsv = rel || normalizeSlashes(r.path || '');
+        lines.push([ r.name, pathForCsv, String(r.score ?? -1) ].join(',') + '\n');
+    }
 	await fs.promises.writeFile(outPath, lines.join(''), 'utf8');
 	return outPath;
 }
@@ -164,9 +185,9 @@ async function selectAndLoadFolder(win) {
 		try { files = await scanFolderRecursive(folderPath); }
 		catch (e) { return { error: `Failed to scan folder: ${e.message}` }; }
 		const images = []; let skipped = 0;
-		for (let i = 0; i < files.length; i++) {
+        for (let i = 0; i < files.length; i++) {
 			const file = files[i];
-			try { images.push(await loadImageToMemory(file)); }
+            try { images.push(await loadImageToMemory(file, folderPath)); }
 			catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
 			if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
 		}
