@@ -84,10 +84,11 @@ function renderGrid() {
 		img.src = r.thumbDataUrl || r.fullDataUrl || '';
 		img.alt = r.name;
 		img.loading = 'lazy';
-		img.addEventListener('error', () => {
+        img.addEventListener('error', () => {
 			if (img.src && img.src !== r.fullDataUrl) img.src = r.fullDataUrl; else { img.remove(); const ph = document.createElement('div'); ph.style.height='160px'; ph.style.background='#2a2a2a'; ph.style.display='flex'; ph.style.alignItems='center'; ph.style.justifyContent='center'; ph.textContent='No preview'; card.prepend(ph); }
 		});
-		img.addEventListener('click', (ev) => { handleCardClick(i, ev); });
+        // Use mousedown so selection state updates before any quick keyboard action
+        img.addEventListener('mousedown', (ev) => { if (ev.button === 0) { handleCardClick(i, ev); ev.preventDefault(); } });
 		img.addEventListener('dblclick', () => { state.currentIndex = i; renderViewer(); showViewer(); });
 		const meta = document.createElement('div');
 		meta.className = 'meta';
@@ -132,9 +133,10 @@ function handleCardClick(i, event) {
         for (let k = a; k <= b; k++) state.selectedIndices.add(k);
         state.currentIndex = i;
     } else if (isToggle) {
-		if (state.selectedIndices.has(i)) state.selectedIndices.delete(i); else state.selectedIndices.add(i);
-		state.anchorIndex = i;
-		state.currentIndex = i;
+        if (state.selectedIndices.has(i)) state.selectedIndices.delete(i); else state.selectedIndices.add(i);
+        state.anchorIndex = i;
+        // Keep focus on the toggled card so actions apply immediately
+        state.currentIndex = i;
 	} else {
 		clearSelection();
 		state.currentIndex = i;
@@ -144,12 +146,18 @@ function handleCardClick(i, event) {
 }
 
 function applyScoreToSelection(score) {
-	if (isGalleryVisible() && state.selectedIndices.size > 0) {
-		for (const i of state.selectedIndices) { state.records[i].score = score; updateCardMeta(state.records[i]); }
-		scheduleCsvSync();
-	} else {
-		setScore(score);
-	}
+    const inGallery = isGalleryVisible();
+    const indices = inGallery
+        ? (state.selectedIndices.size > 0 ? Array.from(state.selectedIndices) : [state.currentIndex])
+        : [state.currentIndex];
+    for (const idx of indices) {
+        const rec = state.records[idx];
+        if (!rec) continue;
+        rec.score = score;
+        updateCardMeta(rec);
+    }
+    if (inGallery) updateGridSelection(); else renderViewer();
+    scheduleCsvSync();
 }
 
 function applyViewerZoom() {
