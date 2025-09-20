@@ -4,6 +4,7 @@ html, body {
 	background: #111;
 	color: #eee;
 	font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
 }
 #toolbar {
 	position: fixed;
@@ -17,13 +18,13 @@ html, body {
 	background: #1e1e1e;
 	border-bottom: 1px solid #333;
 	z-index: 1000;
-	height: 50px;
+    height: 56px;
 	box-sizing: border-box;
 }
 #toolbar #status { margin-left: auto; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button { background: #2e2e2e; color: #eee; border: 1px solid #444; padding: 6px 10px; border-radius: 6px; }
 button:hover { background: #3a3a3a; cursor: pointer; }
-.view { height: calc(100% - 50px); margin-top: 50px; }
+.view { height: calc(100% - 56px); margin-top: 56px; }
 .hidden { display: none; }
 #grid {
 	display: grid;
@@ -42,4 +43,15 @@ button:hover { background: #3a3a3a; cursor: pointer; }
 .card.selected { outline: 2px solid #5aa0ff; box-shadow: 0 0 0 2px #5aa0ff; }
 #viewerContainer { position: relative; width: 100%; height: calc(100% - 0px); display: flex; align-items: center; justify-content: center; }
 #viewerImage { max-width: 100%; max-height: 100%; object-fit: contain; }
+#viewerImage { user-select: none; -webkit-user-drag: none; }
 #viewerMeta { position: absolute; left: 16px; bottom: 16px; background: rgba(0,0,0,0.5); padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+/* When zoomed, allow panning via scroll and show grab cursor */
+#viewerContainer.zoomed { overflow: auto; align-items: flex-start; justify-content: flex-start; cursor: grab; }
+#viewerContainer.dragging { cursor: grabbing; }
+/* Prevent flexbox from shrinking the image when zoomed so it can overflow */
+#viewerContainer.zoomed img { flex: 0 0 auto; display: block; }
+
+/* Zoom bar */
+#zoomBar { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+#zoomSlider { width: 140px; }
+#zoomLabel { font-size: 12px; opacity: 0.9; min-width: 42px; text-align: right; }

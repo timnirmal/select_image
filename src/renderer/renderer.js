@@ -12,9 +12,12 @@ const statusEl = document.getElementById('status');
 const gridEl = document.getElementById('grid');
 const viewerEl = document.getElementById('viewer');
 const galleryEl = document.getElementById('gallery');
+const viewerContainerEl = document.getElementById('viewerContainer');
 const viewerImageEl = document.getElementById('viewerImage');
 const viewerMetaEl = document.getElementById('viewerMeta');
 const zoomSelect = document.getElementById('zoomSelect');
+const zoomSlider = document.getElementById('zoomSlider');
+const zoomLabel = document.getElementById('zoomLabel');
 const clearThumbsBtn = document.getElementById('clearThumbsBtn');
 let viewerZoomMode = 'fit'; // 'fit' or numeric percent
 
@@ -151,12 +154,25 @@ function applyViewerZoom() {
 	const r = state.records[state.currentIndex];
 	if (!r) return;
 	const img = viewerImageEl;
+    if (viewerZoomMode === 'fit') {
+        viewerContainerEl.classList.remove('zoomed');
+        try { viewerContainerEl.scrollTo({ left: 0, top: 0, behavior: 'auto' }); } catch (_) { viewerContainerEl.scrollLeft = 0; viewerContainerEl.scrollTop = 0; }
+    }
 	if (viewerZoomMode === 'fit') {
-		img.style.width = ''; img.style.height = ''; img.style.maxWidth = '100%'; img.style.maxHeight = '100%';
+        // Fill the viewer while preserving aspect ratio (allows upscaling)
+        img.style.maxWidth = 'none'; img.style.maxHeight = 'none';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        if (zoomSlider) { zoomSlider.value = '100'; }
+        if (zoomLabel) { zoomLabel.textContent = 'Fit'; }
 	} else {
 		const pct = Number(viewerZoomMode);
 		img.style.maxWidth = 'none'; img.style.maxHeight = 'none';
 		img.style.width = pct + '%'; img.style.height = 'auto';
+        // Enable scroll/pan whenever zoom > 100%
+        viewerContainerEl.classList.toggle('zoomed', pct > 100);
+        if (zoomSlider) { zoomSlider.value = String(pct); }
+        if (zoomLabel) { zoomLabel.textContent = `${pct}%`; }
 	}
 }
 
@@ -231,14 +247,18 @@ async function loadCsvScores(folderPath) {
 }
 
 viewerEl.addEventListener('wheel', (e) => {
-	if (e.ctrlKey || e.metaKey) {
-		e.preventDefault();
-		if (viewerZoomMode === 'fit') viewerZoomMode = 100;
-		const delta = e.deltaY < 0 ? 10 : -10;
-		viewerZoomMode = Math.max(10, Math.min(800, Number(viewerZoomMode) + delta));
-		zoomSelect.value = String(viewerZoomMode);
-		applyViewerZoom();
-	}
+    if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (viewerZoomMode === 'fit') viewerZoomMode = 100;
+        // Slower zoom: smaller step, scale step with current zoom for smoother feel
+        const baseStep = 5; // percent
+        const current = Number(viewerZoomMode);
+        const step = Math.max(2, Math.round(baseStep * (current >= 200 ? 0.5 : 1)));
+        const delta = e.deltaY < 0 ? step : -step;
+        viewerZoomMode = Math.max(10, Math.min(800, current + delta));
+        zoomSelect.value = String(viewerZoomMode);
+        applyViewerZoom();
+    }
 }, { passive: false });
 
 zoomSelect.addEventListener('change', () => {
@@ -246,6 +266,15 @@ zoomSelect.addEventListener('change', () => {
 	viewerZoomMode = val === 'fit' ? 'fit' : Number(val);
 	applyViewerZoom();
 });
+
+if (zoomSlider) {
+    zoomSlider.addEventListener('input', () => {
+        const val = Number(zoomSlider.value);
+        viewerZoomMode = val;
+        zoomSelect.value = String(val);
+        applyViewerZoom();
+    });
+}
 
 const openBtn = document.getElementById('openBtn');
 const saveBtn = document.getElementById('saveBtn');
@@ -309,7 +338,18 @@ window.addEventListener('keydown', (e) => {
 	else if (e.key === 'n' || e.key === 'N') { applyScoreToSelection(0); }
 	else if (e.key >= '1' && e.key <= '5') { applyScoreToSelection(parseInt(e.key, 10)); }
 	else if (e.key.toLowerCase() === 'g') { showGallery(); }
-	else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
+    else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
+    else if (e.key.toLowerCase() === 'z') { // zoom in
+        if (viewerZoomMode === 'fit') viewerZoomMode = 100;
+        viewerZoomMode = Math.min(800, Number(viewerZoomMode) + 10);
+        zoomSelect.value = String(viewerZoomMode);
+        applyViewerZoom();
+    } else if (e.key.toLowerCase() === 'x') { // zoom out
+        if (viewerZoomMode === 'fit') viewerZoomMode = 100;
+        viewerZoomMode = Math.max(10, Number(viewerZoomMode) - 10);
+        if (viewerZoomMode === 100) zoomSelect.value = '100';
+        applyViewerZoom();
+    }
 });
 
 clearThumbsBtn.addEventListener('click', async () => {
@@ -323,3 +363,47 @@ galleryBtn.addEventListener('click', showGallery);
 viewerBtn.addEventListener('click', () => { if (state.records.length) { renderViewer(); showViewer(); }});
 
 readyStatus();
+
+// --- Panning via mouse drag when zoomed ---
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let scrollStartLeft = 0;
+let scrollStartTop = 0;
+
+viewerContainerEl.addEventListener('mousedown', (e) => {
+    if (viewerZoomMode === 'fit') return;
+    if (e.button !== 0) return; // left button only
+    if (e.target !== viewerImageEl) return; // drag only when grabbing the image
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    scrollStartLeft = viewerContainerEl.scrollLeft;
+    scrollStartTop = viewerContainerEl.scrollTop;
+    viewerContainerEl.classList.add('dragging');
+    e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    viewerContainerEl.scrollLeft = scrollStartLeft - dx;
+    viewerContainerEl.scrollTop = scrollStartTop - dy;
+});
+
+function endDrag() {
+    if (!isDragging) return;
+    isDragging = false;
+    viewerContainerEl.classList.remove('dragging');
+}
+
+document.addEventListener('mouseup', endDrag);
+document.addEventListener('mouseleave', endDrag);
+
+// Double-click resets to Fit
+viewerImageEl.addEventListener('dblclick', () => {
+    viewerZoomMode = 'fit';
+    zoomSelect.value = 'fit';
+    applyViewerZoom();
+});
