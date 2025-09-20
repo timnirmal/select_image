@@ -306,6 +306,9 @@ class ImageGalleryApp(tk.Tk):
                 self._thumb_loading = False  # type: ignore[attr-defined]
                 self.status_var.set(f"Ready • {len(self.images)} images")
 
+        # Start processing thumbnails
+        process_chunk()
+
     # Viewer view
     def show_viewer_current(self) -> None:
         if not self.images:
@@ -328,7 +331,7 @@ class ImageGalleryApp(tk.Tk):
         self.viewer_label.pack(fill=tk.BOTH, expand=True)
 
         self.viewer_status = ttk.Label(self.viewer_frame, anchor=tk.CENTER)
-        self.viewer_status.pack(fill=tk.X)
+        self.viewer_status.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Bind a resize handler that only resizes from cached original image
         if self.viewer_label is not None:
