@@ -370,7 +370,18 @@ async function renderHome() {
     for (const p of db.projects || []) {
         const li = document.createElement('li');
         const title = document.createElement('div');
-        title.innerHTML = `<strong>${p.name}</strong>`;
+        const nameEl = document.createElement('input');
+        nameEl.type = 'text';
+        nameEl.value = p.name || '';
+        nameEl.title = 'Project name';
+        nameEl.style.minWidth = '220px';
+        nameEl.addEventListener('change', async () => {
+            const newName = (nameEl.value || '').trim();
+            if (!newName) return;
+            await window.api.dbRenameProject(p.id, newName);
+            await renderHome();
+        });
+        title.appendChild(nameEl);
         li.appendChild(title);
 
         const foldersUl = document.createElement('ul');
@@ -388,7 +399,7 @@ async function renderHome() {
                     state.currentIndex = 0; renderGrid(); showGallery(); readyStatus();
                 }
             });
-            const revealBtn = document.createElement('button'); revealBtn.textContent = 'Show in Explorer';
+            const revealBtn = document.createElement('button'); revealBtn.className = 'ghost'; revealBtn.textContent = 'Show in Explorer';
             revealBtn.addEventListener('click', () => { window.api.revealInFinder(fp); });
             fli.appendChild(span);
             fli.appendChild(openBtnF);
@@ -398,7 +409,7 @@ async function renderHome() {
         li.appendChild(foldersUl);
 
         const actions = document.createElement('div');
-        const addFolderBtnP = document.createElement('button'); addFolderBtnP.textContent = 'Add Folder…';
+        const addFolderBtnP = document.createElement('button'); addFolderBtnP.className = 'primary'; addFolderBtnP.textContent = 'Add Folder…';
         addFolderBtnP.addEventListener('click', async () => {
             const res = await window.api.selectFolder();
             if (res && res.folderPath) { await window.api.dbAddFolderToProject(p.id, res.folderPath); await renderHome(); }

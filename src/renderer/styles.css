@@ -44,6 +44,10 @@ button { background: #1c2230; color: var(--text); border: 1px solid #2b3448; pad
 button:hover { background: #222a3a; border-color: #37425a; cursor: pointer; }
 button:active { transform: translateY(1px); }
 button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(76,141,255,0.25); }
+button.primary { background: var(--primary); border-color: var(--primary-600); color: #0b1220; }
+button.primary:hover { background: var(--primary-600); }
+button.ghost { background: transparent; border-color: #2b3448; }
+button.ghost:hover { background: #151b28; }
 .view { height: calc(100% - 56px); margin-top: 56px; }
 /* Home view layout */
 #home.view { height: auto; margin-top: 56px; padding: 16px; box-sizing: border-box; }
@@ -52,7 +56,8 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(76,141,255,0.25
 .homeSection h3 { margin: 6px 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; letter-spacing: .4px; }
 #projectList { list-style: none; padding: 0; margin: 0; max-height: 420px; overflow: auto; }
 #projectList > li { padding: 10px 8px; border-bottom: 1px solid #1f2432; }
-#projectList > li > div:first-child { margin-bottom: 6px; font-weight: 600; }
+#projectList > li > div:first-child { margin-bottom: 6px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+#projectList input[type="text"] { background: #10151d; border: 1px solid #20293a; border-radius: 8px; color: var(--text); padding: 6px 10px; }
 #projectList ul { list-style: none; padding: 0; margin: 4px 0 8px; }
 #projectList ul li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--panel-2); border: 1px solid #1f2432; border-radius: 8px; margin-bottom: 6px; }
 #projectList ul li span { flex: 1; color: var(--muted); font-size: 12px; }
@@ -74,11 +79,12 @@ body.mode-gallery #gallery.view { height: auto; }
 	overflow: auto;
 }
 /* In gallery mode, let grid grow and use page scrollbar */
-.body mode-gallery #grid { height: auto; overflow: visible; }
+body.mode-gallery #grid { height: auto; overflow: visible; }
 .card { background: var(--card); border: 1px solid #1f2432; border-radius: 12px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,0.35); transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
 .card:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(0,0,0,0.45); border-color: #2a3346; }
 .card img { width: 100%; height: calc(var(--thumb-size, 200px) * 0.8); object-fit: cover; display: block; }
-.card .meta { padding: 10px; font-size: 12px; color: var(--muted); }
+.card .meta { padding: 10px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+.card .meta .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { display: inline-block; padding: 2px 6px; border-radius: 6px; background: #2f3a2f; color: #9fe09f; margin-left: 6px; }
 .badge.red { background: #7a1e1e; color: #fff; }
 .card.selected { outline: 2px solid rgba(76,141,255,0.8); box-shadow: 0 0 0 2px rgba(76,141,255,0.5); }
@@ -86,6 +92,8 @@ body.mode-gallery #gallery.view { height: auto; }
 #viewerImage { max-width: 100%; max-height: 100%; object-fit: contain; }
 #viewerImage { user-select: none; -webkit-user-drag: none; }
 #viewerMeta { position: absolute; left: 16px; bottom: 16px; background: rgba(15,17,21,0.65); padding: 8px 10px; border-radius: 8px; font-size: 12px; border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+/* Toolbar group spacing */
+#toolbar > * { box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
 /* When zoomed, allow panning via scroll and show grab cursor */
 #viewerContainer.zoomed { overflow: auto; align-items: flex-start; justify-content: flex-start; cursor: grab; }
 #viewerContainer.dragging { cursor: grabbing; }

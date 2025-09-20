@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
     dbLoad: () => ipcRenderer.invoke('db-load'),
     dbAddFolder: (folderPath) => ipcRenderer.invoke('db-add-folder', folderPath),
     dbAddProject: (name) => ipcRenderer.invoke('db-add-project', name),
+    dbRenameProject: (projectId, name) => ipcRenderer.invoke('db-rename-project', projectId, name),
     dbAddFolderToProject: (projectId, folderPath) => ipcRenderer.invoke('db-add-folder-to-project', projectId, folderPath),
     openFolders: (folderPaths) => ipcRenderer.invoke('open-folders', folderPaths),
     loadCsvMulti: (folderPaths) => ipcRenderer.invoke('load-csv-multi', folderPaths),
