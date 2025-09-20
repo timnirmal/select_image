@@ -28,6 +28,14 @@ body.mode-viewer { overflow: hidden; }
 button { background: #2e2e2e; color: #eee; border: 1px solid #444; padding: 6px 10px; border-radius: 6px; }
 button:hover { background: #3a3a3a; cursor: pointer; }
 .view { height: calc(100% - 56px); margin-top: 56px; }
+/* Home view layout */
+#home.view { height: auto; margin-top: 56px; padding: 16px; box-sizing: border-box; }
+#homeContent { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.homeSection { background: #181818; border: 1px solid #2c2c2c; border-radius: 8px; padding: 12px; }
+.homeSection h3 { margin: 6px 0 10px; font-size: 14px; opacity: 0.9; }
+#projectList, #folderList { list-style: none; padding: 0; margin: 0; max-height: 320px; overflow: auto; }
+#projectList li, #folderList li { padding: 8px; border-bottom: 1px solid #252525; display: flex; justify-content: space-between; align-items: center; }
+.homeActions { display: flex; gap: 8px; margin-top: 8px; }
 /* Let gallery take natural height to allow page overflow */
 body.mode-gallery #gallery.view { height: auto; }
 .hidden { display: none; }

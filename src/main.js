@@ -18,6 +18,7 @@ for (const e of RAW_EXTENSIONS) IMAGE_EXTENSIONS.add(e);
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CSV_NAME = 'image_selections.csv';
+const DB_NAME = 'photo_selector_db.json';
 
 function normalizeSlashes(p) { return String(p || '').replace(/\\/g, '/'); }
 
@@ -94,6 +95,12 @@ async function loadImageToMemory(filePath, rootFolder = null) {
 }
 
 function csvPath(folderPath) { return path.join(folderPath, CSV_NAME); }
+function appDbPath() { return path.join(app.getPath('userData'), DB_NAME); }
+async function loadDb() {
+    try { const p = appDbPath(); const s = await fs.promises.readFile(p, 'utf8'); return JSON.parse(s); }
+    catch (_) { return { projects: [], folders: [] }; }
+}
+async function saveDb(db) { const p = appDbPath(); await fs.promises.mkdir(path.dirname(p), { recursive: true }); await fs.promises.writeFile(p, JSON.stringify(db, null, 2), 'utf8'); return true; }
 async function ensureCsvExists(folderPath) {
 	const outPath = csvPath(folderPath);
 	try { await fs.promises.access(outPath, fs.constants.F_OK); }
@@ -195,6 +202,29 @@ async function selectAndLoadFolder(win) {
 	} catch (e) { return { error: e.message }; }
 }
 
+// Multi-folder open helper (returns combined records with folder grouping)
+async function openMultipleFolders(win, folderPaths) {
+    try {
+        const all = [];
+        for (const folderPath of folderPaths) {
+            await ensureCsvExists(folderPath);
+            await ensureThumbsDir(folderPath);
+            let files = [];
+            try { files = await scanFolderRecursive(folderPath); }
+            catch (e) { all.push({ folderPath, error: `Failed to scan: ${e.message}` }); continue; }
+            const images = []; let skipped = 0;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                try { images.push(await loadImageToMemory(file, folderPath)); }
+                catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
+                if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
+            }
+            all.push({ folderPath, images, skipped });
+        }
+        return { result: all };
+    } catch (e) { return { error: e.message }; }
+}
+
 function createWindow() {
 	const win = new BrowserWindow({
 		width: 1280,
@@ -214,6 +244,13 @@ app.whenReady().then(() => {
 	ipcMain.handle('cache-thumb', async (_e, folderPath, id, dataUrl) => { try { return await cacheThumb(folderPath, id, dataUrl); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('clear-thumb-cache', async (_e, folderPath) => { try { return await clearThumbCache(folderPath); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('reveal-in-finder', async (_e, targetPath) => { try { shell.showItemInFolder(targetPath); return true; } catch (e) { return { error: e.message }; } });
+    // Home/Projects handlers
+    ipcMain.handle('db-load', async () => { try { return await loadDb(); } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-folder', async (_e, folderPath) => { try { const db = await loadDb(); if (!db.folders.includes(folderPath)) db.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-project', async (_e, name) => { try { const db = await loadDb(); const id = Date.now().toString(36); db.projects.push({ id, name, folders: [] }); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-folder-to-project', async (_e, projectId, folderPath) => { try { const db = await loadDb(); const p = db.projects.find(p => p.id === projectId); if (p && !p.folders.includes(folderPath)) p.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('open-folders', async (_e, folderPaths) => { try { return await openMultipleFolders(win, folderPaths || []); } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('load-csv-multi', async (_e, folderPaths) => { try { const acc = {}; for (const fp of folderPaths || []) { Object.assign(acc, await readCsvScores(fp)); } return acc; } catch (e) { return { error: e.message }; } });
 	app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
