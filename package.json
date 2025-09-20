@@ -1,0 +1,49 @@
+{
+  "name": "photo-selector-electron",
+  "version": "0.1.0",
+  "description": "Photo selector desktop app (Electron)",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electronmon .",
+    "build": "electron-builder --mac --dir",
+    "pack": "electron-builder --mac --x64 --arm64"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timnirmal/select_image.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/timnirmal/select_image/issues"
+  },
+  "homepage": "https://github.com/timnirmal/select_image#readme",
+  "dependencies": {
+    "electron": "^29",
+    "exiftool-vendored": "^30.5.0",
+    "fast-glob": "^3.3.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron-builder": "^26.0.12",
+    "electronmon": "^2.0.3"
+  },
+  "build": {
+    "appId": "com.photo.selector",
+    "mac": {
+      "category": "public.app-category.photography",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true
+    },
+    "files": [
+      "src/**",
+      "node_modules/**",
+      "package.json"
+    ]
+  }
+}
