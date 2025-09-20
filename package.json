@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "electronmon .",
     "build": "electron-builder --mac --dir",
-    "pack": "electron-builder --mac --x64 --arm64"
+    "pack": "electron-builder --mac --x64 --arm64",
+    "build:win": "electron-builder --win"
   },
   "repository": {
     "type": "git",
@@ -21,17 +22,20 @@
   },
   "homepage": "https://github.com/timnirmal/select_image#readme",
   "dependencies": {
-    "electron": "^29",
     "exiftool-vendored": "^30.5.0",
     "fast-glob": "^3.3.3"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "electron": "^29",
     "electron-builder": "^26.0.12",
     "electronmon": "^2.0.3"
   },
   "build": {
     "appId": "com.photo.selector",
+    "asarUnpack": [
+      "node_modules/exiftool-vendored/**"
+    ],
     "mac": {
       "category": "public.app-category.photography",
       "target": [
@@ -39,6 +43,10 @@
         "zip"
       ],
       "hardenedRuntime": true
+    },
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "files": [
       "src/**",
