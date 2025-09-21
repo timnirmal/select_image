@@ -20,10 +20,19 @@ const zoomSelect = document.getElementById('zoomSelect');
 const zoomSlider = document.getElementById('zoomSlider');
 const zoomLabel = document.getElementById('zoomLabel');
 const gridSlider = document.getElementById('gridSlider');
-const clearThumbsBtn = document.getElementById('clearThumbsBtn');
 const keyboardHelpEl = document.getElementById('keyboardHelp');
 const closeKeyboardHelpBtn = document.getElementById('closeKeyboardHelp');
 const toastContainer = document.getElementById('toastContainer');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const closeSettingsBtn = document.getElementById('closeSettings');
+const clearThumbsBtn = document.getElementById('clearThumbsBtn');
+const showKeyboardHelpBtn = document.getElementById('showKeyboardHelp');
+const themeSelect = document.getElementById('themeSelect');
+const defaultThumbSize = document.getElementById('defaultThumbSize');
+const thumbSizeLabel = document.getElementById('thumbSizeLabel');
+const autoSaveInterval = document.getElementById('autoSaveInterval');
+const maxThumbnailTasks = document.getElementById('maxThumbnailTasks');
 let viewerZoomMode = 'fit'; // 'fit' or numeric percent
 let isFullscreen = false;
 let thumbnailGenerationProgress = { current: 0, total: 0, isGenerating: false };
@@ -59,6 +68,71 @@ function showKeyboardHelp() {
 
 function hideKeyboardHelp() {
 	keyboardHelpEl.classList.add('hidden');
+}
+
+// Settings modal functions
+function showSettings() {
+	settingsModal.classList.remove('hidden');
+	loadSettings();
+}
+
+function hideSettings() {
+	settingsModal.classList.add('hidden');
+	saveSettings();
+}
+
+// Settings persistence
+const DEFAULT_SETTINGS = {
+	theme: 'dark',
+	defaultThumbSize: 200,
+	autoSaveInterval: 400,
+	maxThumbnailTasks: 8
+};
+
+let appSettings = { ...DEFAULT_SETTINGS };
+
+function loadSettings() {
+	try {
+		const saved = localStorage.getItem('photoSelectorSettings');
+		if (saved) {
+			appSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+		}
+	} catch (e) {
+		console.warn('Failed to load settings:', e);
+		appSettings = { ...DEFAULT_SETTINGS };
+	}
+	
+	// Apply settings to UI
+	themeSelect.value = appSettings.theme;
+	defaultThumbSize.value = appSettings.defaultThumbSize;
+	thumbSizeLabel.textContent = appSettings.defaultThumbSize + 'px';
+	autoSaveInterval.value = appSettings.autoSaveInterval;
+	maxThumbnailTasks.value = appSettings.maxThumbnailTasks;
+	
+	// Apply settings to app
+	applyGridSize(appSettings.defaultThumbSize);
+	if (gridSlider) gridSlider.value = appSettings.defaultThumbSize;
+}
+
+function saveSettings() {
+	appSettings = {
+		theme: themeSelect.value,
+		defaultThumbSize: Number(defaultThumbSize.value),
+		autoSaveInterval: Number(autoSaveInterval.value),
+		maxThumbnailTasks: Number(maxThumbnailTasks.value)
+	};
+	
+	try {
+		localStorage.setItem('photoSelectorSettings', JSON.stringify(appSettings));
+	} catch (e) {
+		console.warn('Failed to save settings:', e);
+	}
+	
+	// Apply changes immediately
+	applyGridSize(appSettings.defaultThumbSize);
+	if (gridSlider) gridSlider.value = appSettings.defaultThumbSize;
+	
+	showToast('Settings saved', 'success', 1500);
 }
 
 // Fullscreen functionality
@@ -493,11 +567,13 @@ async function generateThumb(dataUrl, maxSize = 400) {
 let csvSyncTimer = null;
 function scheduleCsvSync() {
 	if (csvSyncTimer) clearTimeout(csvSyncTimer);
+	const delay = appSettings.autoSaveInterval || 400;
+	if (delay === 0) return; // Manual save only
 	csvSyncTimer = setTimeout(async () => {
 		await window.api.updateCsv(state.folderPath, state.records);
 		setStatus('Changes saved');
 		showToast('Changes saved', 'success', 2000);
-	}, 400);
+	}, delay);
 }
 
 async function loadCsvScores(folderPath) {
@@ -901,18 +977,35 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
+// Modal event listeners
+closeKeyboardHelpBtn.addEventListener('click', hideKeyboardHelp);
+keyboardHelpEl.addEventListener('click', (e) => {
+	if (e.target === keyboardHelpEl) hideKeyboardHelp();
+});
+
+// Settings modal event listeners
+settingsBtn.addEventListener('click', showSettings);
+closeSettingsBtn.addEventListener('click', hideSettings);
+settingsModal.addEventListener('click', (e) => {
+	if (e.target === settingsModal) hideSettings();
+});
+
+showKeyboardHelpBtn.addEventListener('click', () => {
+	hideSettings();
+	showKeyboardHelp();
+});
+
+// Settings controls
+defaultThumbSize.addEventListener('input', () => {
+	thumbSizeLabel.textContent = defaultThumbSize.value + 'px';
+});
+
 clearThumbsBtn.addEventListener('click', async () => {
 	if (state.folderPath) { 
 		await window.api.clearThumbCache(state.folderPath); 
 		setStatus('Thumbnail cache cleared'); 
 		showToast('Thumbnail cache cleared', 'info', 2000);
 	}
-});
-
-// Modal event listeners
-closeKeyboardHelpBtn.addEventListener('click', hideKeyboardHelp);
-keyboardHelpEl.addEventListener('click', (e) => {
-	if (e.target === keyboardHelpEl) hideKeyboardHelp();
 });
 
 // Buttons
@@ -931,6 +1024,8 @@ addProjectBtn && addProjectBtn.addEventListener('click', async () => {
 });
 
 readyStatus();
+// Load settings on startup
+loadSettings();
 // Initial home view
 document.body.classList.add('mode-gallery');
 showHome();

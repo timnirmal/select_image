@@ -78,11 +78,11 @@
 			<label for="gridSlider">Grid</label>
 			<input id="gridSlider" type="range" min="120" max="400" step="10" value="200">
 		</div>
-		<button id="clearThumbsBtn" title="Clear Thumbnail Cache">
+		<button id="settingsBtn" title="Settings">
 			<svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c0 1 1 2 2 2v2"/>
+				<circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6"/><path d="m21 12-6-3-6 3-6-3"/>
 			</svg>
-			<span class="btn-text">Clear Thumbs</span>
+			<span class="btn-text">Settings</span>
 		</button>
 		<div class="toolbar-separator"></div>
 		<div id="status"></div>
@@ -90,6 +90,84 @@
 	<!-- Toast Notifications Container -->
 	<div id="toastContainer"></div>
 	
+	<!-- Settings Modal -->
+	<div id="settingsModal" class="modal hidden">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3>Settings</h3>
+				<button id="closeSettings" class="modal-close">×</button>
+			</div>
+			<div class="modal-body">
+				<div class="settings-grid">
+					<div class="settings-section">
+						<h4>Appearance</h4>
+						<div class="setting-item">
+							<label for="themeSelect">Theme</label>
+							<select id="themeSelect">
+								<option value="dark">Dark</option>
+								<option value="light">Light</option>
+								<option value="auto">Auto</option>
+							</select>
+						</div>
+						<div class="setting-item">
+							<label for="defaultThumbSize">Default Thumbnail Size</label>
+							<input id="defaultThumbSize" type="range" min="120" max="400" step="20" value="200">
+							<span id="thumbSizeLabel">200px</span>
+						</div>
+					</div>
+					
+					<div class="settings-section">
+						<h4>Performance</h4>
+						<div class="setting-item">
+							<label for="autoSaveInterval">Auto-save Interval</label>
+							<select id="autoSaveInterval">
+								<option value="400">Immediate (400ms)</option>
+								<option value="1000">Fast (1s)</option>
+								<option value="3000">Normal (3s)</option>
+								<option value="5000">Slow (5s)</option>
+								<option value="0">Manual only</option>
+							</select>
+						</div>
+						<div class="setting-item">
+							<label for="maxThumbnailTasks">Max Concurrent Thumbnails</label>
+							<select id="maxThumbnailTasks">
+								<option value="4">4 (Conservative)</option>
+								<option value="8">8 (Default)</option>
+								<option value="12">12 (Fast)</option>
+								<option value="16">16 (Aggressive)</option>
+							</select>
+						</div>
+					</div>
+					
+					<div class="settings-section">
+						<h4>Cache Management</h4>
+						<div class="setting-item">
+							<button id="clearThumbsBtn" class="danger">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c0 1 1 2 2 2v2"/>
+								</svg>
+								Clear Thumbnail Cache
+							</button>
+							<p class="setting-description">Remove all cached thumbnails to free up disk space</p>
+						</div>
+					</div>
+					
+					<div class="settings-section">
+						<h4>Keyboard Shortcuts</h4>
+						<div class="setting-item">
+							<button id="showKeyboardHelp" class="ghost">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<circle cx="12" cy="12" r="10"/><path d="M9,9h0a3,3,0,0,1,5.12-2.12A3,3,0,0,1,15,9c0,1-1,1.5-2.5,2S10,12.5,10,14"/><circle cx="12" cy="18" r=".5"/>
+								</svg>
+								View Keyboard Shortcuts
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
 	<!-- Keyboard Help Overlay -->
 	<div id="keyboardHelp" class="modal hidden">
 		<div class="modal-content">
