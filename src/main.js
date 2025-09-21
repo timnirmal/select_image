@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 const fg = require('fast-glob');
 const { exiftool } = require('exiftool-vendored');
@@ -63,6 +64,13 @@ function guessMimeFromExt(ext) {
 }
 
 function bufferToDataUrl(buffer, mime) { return `data:${mime};base64,${buffer.toString('base64')}`; }
+
+// Thumbnail generation in main process (using canvas)
+async function generateThumbOnMain(dataUrl, maxSize = 400) {
+	// For now, we'll let the renderer handle thumbnail generation
+	// This could be moved to a worker process for better performance
+	return null;
+}
 
 async function loadImageToMemory(filePath, rootFolder = null) {
 	const extension = extOf(filePath);
@@ -203,25 +211,44 @@ async function readThumbAsDataUrl(folderPath, id) {
 	} catch (_) { return null; }
 }
 
+// Lightweight image metadata without loading full data
+async function loadImageMetadata(filePath, rootFolder = null) {
+    const stats = await fs.promises.stat(filePath);
+    const rel = rootFolder ? normalizeSlashes(path.relative(rootFolder, filePath)) : null;
+    return {
+        id: `${stats.ino}-${stats.mtimeMs}-${stats.size}`,
+        name: path.basename(filePath),
+        path: filePath,
+        relPath: rel,
+        ext: extOf(filePath),
+        size: stats.size,
+        fullDataUrl: null, // Load on demand
+        thumbDataUrl: null,
+    };
+}
+
 async function selectAndLoadFolder(win) {
 	try {
 		const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'] });
 		if (canceled || !filePaths || filePaths.length === 0) return { folderPath: null, images: [], skipped: 0 };
 		const folderPath = filePaths[0];
 		await ensureCsvExists(folderPath);
-		await ensureThumbsDir(folderPath); // make sure .thumbnails exists up front
+		await ensureThumbsDir(folderPath);
 		try { await exiftool.version(); } catch (_) {}
 		let files = [];
 		try { files = await scanFolderRecursive(folderPath); }
 		catch (e) { return { error: `Failed to scan folder: ${e.message}` }; }
-		const images = []; let skipped = 0;
+		
+        // Return immediately with file paths - no image loading
+		const images = [];
         for (let i = 0; i < files.length; i++) {
 			const file = files[i];
-            try { images.push(await loadImageToMemory(file, folderPath)); }
-			catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
-			if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
+            try { 
+                images.push(await loadImageMetadata(file, folderPath)); 
+			}
+			catch (e) { if (isDev) console.warn('Skipped file', file); }
 		}
-		return { folderPath, images, skipped };
+        return { folderPath, images, skipped: 0, totalFiles: files.length };
 	} catch (e) { return { error: e.message }; }
 }
 
@@ -238,7 +265,7 @@ async function openMultipleFolders(win, folderPaths) {
             const images = []; let skipped = 0;
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
-                try { images.push(await loadImageToMemory(file, folderPath)); }
+                try { images.push(await loadImageMetadata(file, folderPath)); }
                 catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
                 if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
             }
@@ -252,11 +279,29 @@ function createWindow() {
 	const win = new BrowserWindow({
 		width: 1280,
 		height: 900,
-		webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
+		webPreferences: { 
+			contextIsolation: true, 
+			nodeIntegration: false, 
+			preload: path.join(__dirname, 'preload.js'),
+			// Disable GPU acceleration if cache issues persist
+			webSecurity: true,
+			allowRunningInsecureContent: false
+		},
 	});
 	win.loadFile(path.join(__dirname, 'renderer/index.html'));
 	return win;
 }
+
+// Stabilize GPU/Cache behavior on Windows to avoid startup crashes
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('no-sandbox');
+// Force cache to a writable temp location
+try {
+    const tempCacheDir = path.join(os.tmpdir(), 'photo-selector-cache');
+    app.commandLine.appendSwitch('disk-cache-dir', tempCacheDir);
+} catch (_) {}
 
 app.whenReady().then(() => {
 	const win = createWindow();
@@ -267,6 +312,23 @@ app.whenReady().then(() => {
 	ipcMain.handle('cache-thumb', async (_e, folderPath, id, dataUrl) => { try { return await cacheThumb(folderPath, id, dataUrl); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('clear-thumb-cache', async (_e, folderPath) => { try { return await clearThumbCache(folderPath); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('reveal-in-finder', async (_e, targetPath) => { try { shell.showItemInFolder(targetPath); return true; } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('load-full-image', async (_e, filePath) => { try { return await loadImageToMemory(filePath); } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('generate-thumbnail', async (_e, filePath, folderPath) => { 
+		try { 
+			const fullImage = await loadImageToMemory(filePath);
+			if (fullImage && fullImage.fullDataUrl) {
+				// Generate thumbnail and cache it
+				const thumbCanvas = await generateThumbOnMain(fullImage.fullDataUrl, 400);
+				if (thumbCanvas) {
+					await cacheThumb(folderPath, fullImage.id, thumbCanvas);
+					return { id: fullImage.id, thumbDataUrl: thumbCanvas };
+				}
+			}
+			return { error: 'Failed to generate thumbnail' };
+		} catch (e) { 
+			return { error: e.message }; 
+		} 
+	});
     // Home/Projects handlers
     ipcMain.handle('db-load', async () => { try { return await loadDb(); } catch (e) { return { error: e.message }; } });
     ipcMain.handle('db-add-folder', async (_e, folderPath) => { try { const db = await loadDb(); if (!db.folders.includes(folderPath)) db.folders.push(folderPath); const def = db.projects.find(p => p.id === DEFAULT_PROJECT_ID) || db.projects[0]; if (def && !def.folders.includes(folderPath)) def.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });

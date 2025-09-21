@@ -25,6 +25,8 @@ const keyboardHelpEl = document.getElementById('keyboardHelp');
 const closeKeyboardHelpBtn = document.getElementById('closeKeyboardHelp');
 const toastContainer = document.getElementById('toastContainer');
 let viewerZoomMode = 'fit'; // 'fit' or numeric percent
+let isFullscreen = false;
+let thumbnailGenerationProgress = { current: 0, total: 0, isGenerating: false };
 
 // Toast notification system
 function showToast(message, type = 'info', duration = 3000) {
@@ -59,6 +61,18 @@ function hideKeyboardHelp() {
 	keyboardHelpEl.classList.add('hidden');
 }
 
+// Fullscreen functionality
+function toggleFullscreen() {
+	isFullscreen = !isFullscreen;
+	document.body.classList.toggle('fullscreen', isFullscreen);
+	
+	if (isFullscreen) {
+		showToast('Fullscreen mode - Press F11 or Esc to exit', 'info', 3000);
+	} else {
+		showToast('Exited fullscreen', 'info', 1500);
+	}
+}
+
 function isGalleryVisible() { return !galleryEl.classList.contains('hidden'); }
 function setStatus(text) { statusEl.textContent = text; }
 function showHome() { homeEl.classList.remove('hidden'); galleryEl.classList.add('hidden'); viewerEl.classList.add('hidden'); document.body.classList.add('mode-gallery'); document.body.classList.remove('mode-viewer'); }
@@ -75,28 +89,173 @@ function badgeHtml(score) {
 
 const MAX_PARALLEL = 8;
 let lazyObserver = null;
+let activeThumbTasks = 0;
+const pendingThumbIndices = new Set();
+
+async function ensureFullImage(i) {
+	const r = state.records[i];
+	if (!r || r.fullDataUrl) return;
+	
+	try {
+		const fullImage = await window.api.loadFullImage(r.path);
+		if (fullImage && fullImage.fullDataUrl) {
+			r.fullDataUrl = fullImage.fullDataUrl;
+		}
+	} catch (e) {
+		console.warn('Failed to load full image:', r.path, e);
+	}
+}
 
 async function ensureThumb(i) {
 	const r = state.records[i];
 	if (!r) return;
-	if (!r.thumbDataUrl) {
-		const cached = await window.api.getThumb(state.folderPath, r.id);
-		if (cached) r.thumbDataUrl = cached;
-	}
-	if (!r.thumbDataUrl) {
-		r.thumbDataUrl = await generateThumb(r.fullDataUrl, 400);
-		if (r.thumbDataUrl) await window.api.cacheThumb(state.folderPath, r.id, r.thumbDataUrl);
-	}
+	
 	const card = state.cardByIndex[i];
-	if (card) {
-		const img = card.querySelector('img');
-		if (img) img.src = r.thumbDataUrl || r.fullDataUrl;
+	if (!card) return;
+	
+	// Check for cached thumbnail first
+	if (!r.thumbDataUrl) {
+		try {
+			const cached = await window.api.getThumb(state.folderPath, r.id);
+			if (cached && !cached.error) {
+				r.thumbDataUrl = cached;
+				const placeholder = card.querySelector('.image-placeholder');
+				if (placeholder) {
+					const img = document.createElement('img');
+					img.src = cached;
+					img.alt = r.name;
+					img.style.width = '100%';
+					img.style.height = 'calc(var(--thumb-size, 200px) * 0.8)';
+					img.style.objectFit = 'cover';
+					img.style.display = 'block';
+					img.style.opacity = '0';
+					img.style.transition = 'opacity 0.3s ease';
+					
+					placeholder.replaceWith(img);
+					
+					requestAnimationFrame(() => {
+						img.style.opacity = '1';
+					});
+				}
+				return;
+			}
+		} catch (e) {
+			console.warn('Failed to load cached thumbnail for', r.path, e);
+		}
+	}
+	
+	// If no cached thumb, generate one in background
+	if (!r.thumbDataUrl && !r.isGeneratingThumb) {
+        if (activeThumbTasks >= MAX_PARALLEL) {
+            pendingThumbIndices.add(i);
+            return;
+        }
+		r.isGeneratingThumb = true;
+        activeThumbTasks++;
+		
+		try {
+			console.log('Generating thumbnail for:', r.path);
+			// Load full image and generate thumbnail
+			const fullImage = await window.api.loadFullImage(r.path);
+			if (fullImage && fullImage.error) {
+				console.warn('Failed to load full image:', fullImage.error);
+				// Show error placeholder
+				const placeholder = card.querySelector('.image-placeholder');
+				if (placeholder) {
+					placeholder.innerHTML = `
+						<div style="text-align: center; color: #ef4444;">
+							<div style="font-size: 24px; margin-bottom: 4px;">⚠️</div>
+							<div>Failed to load</div>
+						</div>
+					`;
+				}
+				return;
+			}
+			
+			if (fullImage && fullImage.fullDataUrl) {
+				const thumbDataUrl = await generateThumb(fullImage.fullDataUrl, 400);
+				if (thumbDataUrl) {
+					r.thumbDataUrl = thumbDataUrl;
+					try {
+						await window.api.cacheThumb(state.folderPath, r.id, thumbDataUrl);
+					} catch (e) {
+						console.warn('Failed to cache thumbnail:', e);
+					}
+					
+					// Replace placeholder with actual image
+					const placeholder = card.querySelector('.image-placeholder');
+					if (placeholder) {
+						const img = document.createElement('img');
+						img.src = thumbDataUrl;
+						img.alt = r.name;
+						img.style.width = '100%';
+						img.style.height = 'calc(var(--thumb-size, 200px) * 0.8)';
+						img.style.objectFit = 'cover';
+						img.style.display = 'block';
+						img.style.opacity = '0';
+						img.style.transition = 'opacity 0.3s ease';
+						
+						placeholder.replaceWith(img);
+						
+						requestAnimationFrame(() => {
+							img.style.opacity = '1';
+						});
+					}
+				} else {
+					console.warn('Failed to generate thumbnail canvas for', r.path);
+					// Show error placeholder
+					const placeholder = card.querySelector('.image-placeholder');
+					if (placeholder) {
+						placeholder.innerHTML = `
+							<div style="text-align: center; color: #ef4444;">
+								<div style="font-size: 24px; margin-bottom: 4px;">⚠️</div>
+								<div>Thumbnail failed</div>
+							</div>
+						`;
+					}
+				}
+			} else {
+				console.warn('No full image data received for', r.path);
+				// Show error placeholder
+				const placeholder = card.querySelector('.image-placeholder');
+				if (placeholder) {
+					placeholder.innerHTML = `
+						<div style="text-align: center; color: #ef4444;">
+							<div style="font-size: 24px; margin-bottom: 4px;">⚠️</div>
+							<div>No image data</div>
+						</div>
+					`;
+				}
+			}
+		} catch (e) {
+			console.error('Failed to generate thumbnail for', r.path, e);
+			// Show error placeholder
+			const placeholder = card.querySelector('.image-placeholder');
+			if (placeholder) {
+				placeholder.innerHTML = `
+					<div style="text-align: center; color: #ef4444;">
+						<div style="font-size: 24px; margin-bottom: 4px;">⚠️</div>
+						<div>Error: ${e.message}</div>
+					</div>
+				`;
+			}
+		} finally {
+			r.isGeneratingThumb = false;
+            activeThumbTasks = Math.max(0, activeThumbTasks - 1);
+            // Schedule next pending thumb if any
+            const nextIdx = pendingThumbIndices.values().next();
+            if (!nextIdx.done) {
+                pendingThumbIndices.delete(nextIdx.value);
+                // Yield back to UI before starting next
+                setTimeout(() => ensureThumb(nextIdx.value), 0);
+            }
+		}
 	}
 }
 
 function setupLazyObserver() {
 	if (lazyObserver) { try { lazyObserver.disconnect(); } catch (_) {} }
-	lazyObserver = new IntersectionObserver((entries) => {
+    lazyObserver = new IntersectionObserver((entries) => {
 		for (const entry of entries) {
 			if (entry.isIntersecting) {
 				const el = entry.target;
@@ -105,7 +264,7 @@ function setupLazyObserver() {
 				lazyObserver.unobserve(el);
 			}
 		}
-	}, { root: gridEl, rootMargin: '200px', threshold: 0.01 });
+    }, { root: null, rootMargin: '200px 0px', threshold: 0.01 });
 }
 
 function renderGrid() {
@@ -118,22 +277,45 @@ function renderGrid() {
 		const card = document.createElement('div');
 		card.className = 'card';
 		card.dataset.index = String(i);
-		const img = document.createElement('img');
-		img.src = r.thumbDataUrl || r.fullDataUrl || '';
-		img.alt = r.name;
-		img.loading = 'lazy';
-        img.addEventListener('error', () => {
-			if (img.src && img.src !== r.fullDataUrl) img.src = r.fullDataUrl; else { img.remove(); const ph = document.createElement('div'); ph.style.height='160px'; ph.style.background='#2a2a2a'; ph.style.display='flex'; ph.style.alignItems='center'; ph.style.justifyContent='center'; ph.textContent='No preview'; card.prepend(ph); }
-		});
-        // Use mousedown so selection state updates before any quick keyboard action
-        img.addEventListener('mousedown', (ev) => { if (ev.button === 0) { handleCardClick(i, ev); ev.preventDefault(); } });
-		img.addEventListener('dblclick', () => { state.currentIndex = i; renderViewer(); showViewer(); });
-		const meta = document.createElement('div');
+		// Create placeholder or image
+		let imageElement;
+		if (r.thumbDataUrl) {
+			imageElement = document.createElement('img');
+			imageElement.src = r.thumbDataUrl;
+			imageElement.alt = r.name;
+			imageElement.loading = 'lazy';
+			card.appendChild(imageElement);
+		} else {
+			// Gray placeholder while thumbnail loads
+			const placeholder = document.createElement('div');
+			placeholder.className = 'image-placeholder';
+			placeholder.style.height = 'calc(var(--thumb-size, 200px) * 0.8)';
+			placeholder.style.background = 'linear-gradient(135deg, #1a1f2e, #252a3a)';
+			placeholder.style.display = 'flex';
+			placeholder.style.alignItems = 'center';
+			placeholder.style.justifyContent = 'center';
+			placeholder.style.color = '#6b7585';
+			placeholder.style.fontSize = '12px';
+			placeholder.style.borderRadius = '8px 8px 0 0';
+			placeholder.innerHTML = `
+				<div style="text-align: center;">
+					<div style="font-size: 24px; margin-bottom: 4px;">📷</div>
+					<div>Loading...</div>
+				</div>
+			`;
+			imageElement = placeholder;
+			card.appendChild(placeholder);
+		}
+		
+        // Add event listeners to the card instead of just the image
+        card.addEventListener('mousedown', (ev) => { if (ev.button === 0) { handleCardClick(i, ev); ev.preventDefault(); } });
+		card.addEventListener('dblclick', async () => { state.currentIndex = i; await renderViewer(); showViewer(); });
+        const meta = document.createElement('div');
 		meta.className = 'meta';
 		meta.dataset.id = r.id;
 		meta.innerHTML = `${r.name} ${badgeHtml(r.score)}`;
 		state.metaById.set(r.id, meta);
-		card.appendChild(img);
+        card.appendChild(imageElement);
 		card.appendChild(meta);
 		gridEl.appendChild(card);
 		state.cardByIndex.push(card);
@@ -224,14 +406,42 @@ function applyViewerZoom() {
 	}
 }
 
-function renderViewer() {
+async function renderViewer() {
 	if (state.records.length === 0) return;
 	const r = state.records[state.currentIndex];
-	viewerImageEl.src = r.fullDataUrl;
+	
+	// Load full image if not already loaded
+	if (!r.fullDataUrl) {
+		viewerImageEl.src = ''; // Clear while loading
+		setStatus('Loading image...');
+		await ensureFullImage(state.currentIndex);
+	}
+	
+	viewerImageEl.src = r.fullDataUrl || '';
 	const stateLabel = r.score === -1 ? 'Not selected' : (r.score === 0 ? 'Rejected' : `Accepted • Score ${r.score}`);
 	viewerMetaEl.textContent = `${r.name}  •  ${stateLabel}  •  ${state.currentIndex + 1}/${state.records.length}`;
-	setStatus(`${state.records.length} images loaded in memory`);
+	setStatus(`${state.records.length} images loaded`);
 	applyViewerZoom();
+	
+	// Preload next and previous images in background
+	preloadAdjacentImages();
+}
+
+// Preload next and previous images for smooth navigation
+function preloadAdjacentImages() {
+	if (state.records.length <= 1) return;
+	
+	const nextIndex = (state.currentIndex + 1) % state.records.length;
+	const prevIndex = (state.currentIndex - 1 + state.records.length) % state.records.length;
+	
+	// Preload in background without blocking UI
+	setTimeout(() => {
+		ensureFullImage(nextIndex).catch(() => {}); // Silent fail
+	}, 100);
+	
+	setTimeout(() => {
+		ensureFullImage(prevIndex).catch(() => {}); // Silent fail
+	}, 200);
 }
 
 function updateCardMeta(record) {
@@ -252,16 +462,16 @@ function setScore(score) {
 	scheduleCsvSync();
 }
 
-function prevImage() {
+async function prevImage() {
 	if (!state.records.length) return;
 	state.currentIndex = (state.currentIndex - 1 + state.records.length) % state.records.length;
-	if (isGalleryVisible()) updateGridSelection(); else renderViewer();
+	if (isGalleryVisible()) updateGridSelection(); else await renderViewer();
 }
 
-function nextImage() {
+async function nextImage() {
 	if (!state.records.length) return;
 	state.currentIndex = (state.currentIndex + 1) % state.records.length;
-	if (isGalleryVisible()) updateGridSelection(); else renderViewer();
+	if (isGalleryVisible()) updateGridSelection(); else await renderViewer();
 }
 
 async function generateThumb(dataUrl, maxSize = 400) {
@@ -516,38 +726,58 @@ async function renderHome() {
     });
     
     projectGridEl.addEventListener('click', async (e) => {
-        if (e.target.classList.contains('add-folder-btn')) {
-            const projectId = e.target.dataset.projectId;
-            const res = await window.api.selectFolder();
-            if (res && res.folderPath) {
-                await window.api.dbAddFolderToProject(projectId, res.folderPath);
-                await renderHome();
-                showToast('Folder added to project', 'success', 2000);
+        if (e.target.classList.contains('add-folder-btn') || e.target.closest('.add-folder-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = e.target.classList.contains('add-folder-btn') ? e.target : e.target.closest('.add-folder-btn');
+            const projectId = btn.dataset.projectId;
+            
+            // Disable button during selection
+            btn.disabled = true;
+            try {
+                const res = await window.api.selectFolder();
+                if (res && res.folderPath) {
+                    await window.api.dbAddFolderToProject(projectId, res.folderPath);
+                    await renderHome();
+                    showToast('Folder added to project', 'success', 2000);
+                }
+            } finally {
+                btn.disabled = false;
             }
-        } else if (e.target.classList.contains('open-all-btn')) {
-            const projectId = e.target.dataset.projectId;
+        } else if (e.target.classList.contains('open-all-btn') || e.target.closest('.open-all-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = e.target.classList.contains('open-all-btn') ? e.target : e.target.closest('.open-all-btn');
+            const projectId = btn.dataset.projectId;
             const project = db.projects.find(p => p.id === projectId);
             if (!project || !project.folders.length) return;
             
-            const res = await window.api.openFolders(project.folders);
-            if (!res || !res.result) { showToast('Failed to open folders', 'error'); return; }
-            
-            const merged = [];
-            for (const r of res.result) {
-                if (!r || !r.folderPath) continue;
-                const scoreMap = await loadCsvScores(r.folderPath);
-                for (const img of (r.images || [])) {
-                    merged.push({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) });
+            btn.disabled = true;
+            try {
+                const res = await window.api.openFolders(project.folders);
+                if (!res || !res.result) { showToast('Failed to open folders', 'error'); return; }
+                
+                const merged = [];
+                for (const r of res.result) {
+                    if (!r || !r.folderPath) continue;
+                    const scoreMap = await loadCsvScores(r.folderPath);
+                    for (const img of (r.images || [])) {
+                        merged.push({ ...img, score: (scoreMap[img.path] ?? scoreMap[img.relPath] ?? scoreMap[img.name] ?? -1) });
+                    }
                 }
+                
+                if (!merged.length) { showToast('No images found', 'info'); return; }
+                state.folderPath = project.folders[0];
+                state.records = merged;
+                state.currentIndex = 0;
+                renderGrid(); showGallery(); readyStatus();
+                showToast(`Loaded ${merged.length} images from ${project.folders.length} folders`, 'success');
+            } finally {
+                btn.disabled = false;
             }
-            
-            if (!merged.length) { showToast('No images found', 'info'); return; }
-            state.folderPath = project.folders[0];
-            state.records = merged;
-            state.currentIndex = 0;
-            renderGrid(); showGallery(); readyStatus();
-            showToast(`Loaded ${merged.length} images from ${project.folders.length} folders`, 'success');
         } else if (e.target.classList.contains('open-folder-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
             const folderPath = e.target.dataset.folderPath;
             const res = await window.api.openFolders([folderPath]);
             if (res && res.result && res.result[0]) {
@@ -560,6 +790,8 @@ async function renderHome() {
                 showToast(`Loaded ${state.records.length} images`, 'success');
             }
         } else if (e.target.classList.contains('reveal-folder-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
             const folderPath = e.target.dataset.folderPath;
             window.api.revealInFinder(folderPath);
         }
@@ -573,10 +805,10 @@ async function saveCsv() {
 		return; 
 	}
 	try {
-		await window.api.updateCsv(state.folderPath, state.records);
-		setStatus('CSV saved');
+	await window.api.updateCsv(state.folderPath, state.records);
+	setStatus('CSV saved');
 		showToast('CSV saved successfully', 'success');
-		setTimeout(readyStatus, 800);
+	setTimeout(readyStatus, 800);
 	} catch (e) {
 		const errorMsg = `Failed to save CSV: ${e.message}`;
 		setStatus(errorMsg);
@@ -594,6 +826,12 @@ function isTypingInInput() {
 	const editableContent = activeElement.contentEditable === 'true';
 	
 	return inputTypes.includes(tagName) || editableContent;
+}
+
+// Check if we're in a view where photo shortcuts should work
+function isInPhotoView() {
+	// Only allow photo shortcuts in Gallery or Viewer modes
+	return !galleryEl.classList.contains('hidden') || !viewerEl.classList.contains('hidden');
 }
 
 // Keyboard
@@ -622,19 +860,32 @@ window.addEventListener('keydown', (e) => {
 	// Help shortcut (only when not typing)
 	if (e.key === '?' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); showKeyboardHelp(); return; }
 	
-	// Navigation shortcuts
-	if (e.key === 'Escape') { showGallery(); return; }
+	// Fullscreen toggle
+	if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); return; }
+	
+	// Global navigation shortcuts (work from any view)
+	if (e.key === 'Escape') { 
+		if (isFullscreen) { 
+			toggleFullscreen(); 
+		} else { 
+			showGallery(); 
+		} 
+		return; 
+	}
 	if (e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.metaKey) { showGallery(); return; }
 	if (e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey) { if (state.records.length) { renderViewer(); showViewer(); } return; }
 	if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey) { showHome(); renderHome(); return; }
 	
-	// Image navigation and scoring
+	// Photo-specific shortcuts (only work in Gallery/Viewer)
+	if (!isInPhotoView()) return; // Stop here if not in photo view
+	
+	// Image navigation and scoring (only in photo views)
 	if (e.key === 'ArrowLeft') { prevImage(); }
 	else if (e.key === 'ArrowRight') { nextImage(); }
     else if (e.key === ' ') { e.preventDefault(); const r = state.records[state.currentIndex]; applyScoreToSelection(r.score === -1 || r.score === 0 ? 5 : -1); }
     else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); applyScoreToSelection(0); showToast('Image rejected', 'info', 1500); }
     else if (e.key >= '1' && e.key <= '5') { e.preventDefault(); const score = parseInt(e.key, 10); applyScoreToSelection(score); showToast(`Score set to ${score}`, 'success', 1500); }
-    else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer(); showViewer(); } }
+    else if (e.key === 'Enter') { if (isGalleryVisible() && state.records.length) { renderViewer().then(() => showViewer()); } }
     else if (e.key.toLowerCase() === 'z') { // zoom in
         if (viewerZoomMode === 'fit') viewerZoomMode = 100;
         e.preventDefault();
@@ -668,7 +919,7 @@ keyboardHelpEl.addEventListener('click', (e) => {
 openBtn.addEventListener('click', openFolder);
 saveBtn.addEventListener('click', saveCsv);
 galleryBtn.addEventListener('click', showGallery);
-viewerBtn.addEventListener('click', () => { if (state.records.length) { renderViewer(); showViewer(); }});
+viewerBtn.addEventListener('click', async () => { if (state.records.length) { await renderViewer(); showViewer(); }});
 projectsBtn && projectsBtn.addEventListener('click', () => { showHome(); renderHome(); });
 addProjectBtn && addProjectBtn.addEventListener('click', async () => {
     const name = (newProjectNameEl && newProjectNameEl.value || '').trim();

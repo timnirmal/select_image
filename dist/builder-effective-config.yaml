@@ -18,7 +18,5 @@ files:
   - filter:
       - src/**
       - node_modules/**
-      - '!node_modules/exiftool-vendored.pl'
-      - '!node_modules/exiftool-vendored.pl/**'
       - package.json
 electronVersion: 29.4.6
