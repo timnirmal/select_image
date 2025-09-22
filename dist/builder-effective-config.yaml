@@ -1,0 +1,22 @@
+directories:
+  output: dist
+  buildResources: build
+appId: com.photo.selector
+asarUnpack:
+  - node_modules/exiftool-vendored.exe/**
+mac:
+  category: public.app-category.photography
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+files:
+  - filter:
+      - src/**
+      - node_modules/**
+      - package.json
+electronVersion: 29.4.6

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 const fg = require('fast-glob');
 const { exiftool } = require('exiftool-vendored');
@@ -18,6 +19,11 @@ for (const e of RAW_EXTENSIONS) IMAGE_EXTENSIONS.add(e);
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CSV_NAME = 'image_selections.csv';
+const DB_NAME = 'photo_selector_db.json';
+const DEFAULT_PROJECT_ID = 'default';
+const DEFAULT_PROJECT_NAME = 'Default';
+
+function normalizeSlashes(p) { return String(p || '').replace(/\\/g, '/'); }
 
 async function loadRawPreviewBuffer(filePath) {
 	const tags = ['JpgFromRaw', 'PreviewImage', 'ThumbnailImage'];
@@ -59,7 +65,14 @@ function guessMimeFromExt(ext) {
 
 function bufferToDataUrl(buffer, mime) { return `data:${mime};base64,${buffer.toString('base64')}`; }
 
-async function loadImageToMemory(filePath) {
+// Thumbnail generation in main process (using canvas)
+async function generateThumbOnMain(dataUrl, maxSize = 400) {
+	// For now, we'll let the renderer handle thumbnail generation
+	// This could be moved to a worker process for better performance
+	return null;
+}
+
+async function loadImageToMemory(filePath, rootFolder = null) {
 	const extension = extOf(filePath);
 	let fullBuf; let mime;
 	const browserSafe = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -77,11 +90,13 @@ async function loadImageToMemory(filePath) {
 	} else {
 		fullBuf = await fs.promises.readFile(filePath); mime = guessMimeFromExt(extension);
 	}
-	const stats = await fs.promises.stat(filePath);
+    const stats = await fs.promises.stat(filePath);
+    const rel = rootFolder ? normalizeSlashes(path.relative(rootFolder, filePath)) : null;
 	return {
 		id: `${stats.ino}-${stats.mtimeMs}-${stats.size}`,
 		name: path.basename(filePath),
 		path: filePath,
+        relPath: rel,
 		ext: extension,
 		size: stats.size,
 		fullDataUrl: bufferToDataUrl(fullBuf, mime),
@@ -90,6 +105,33 @@ async function loadImageToMemory(filePath) {
 }
 
 function csvPath(folderPath) { return path.join(folderPath, CSV_NAME); }
+function appDbPath() { return path.join(app.getPath('userData'), DB_NAME); }
+function ensureDbDefaults(db) {
+    if (!db || typeof db !== 'object') db = { projects: [], folders: [] };
+    if (!Array.isArray(db.projects)) db.projects = [];
+    if (!Array.isArray(db.folders)) db.folders = [];
+    let changed = false;
+    let def = db.projects.find(p => p.id === DEFAULT_PROJECT_ID);
+    if (!def) { def = { id: DEFAULT_PROJECT_ID, name: DEFAULT_PROJECT_NAME, folders: [] }; db.projects.unshift(def); changed = true; }
+    for (const fp of db.folders) { if (!def.folders.includes(fp)) { def.folders.push(fp); changed = true; } }
+    return { db, changed };
+}
+
+async function loadDb() {
+    try {
+        const p = appDbPath();
+        const s = await fs.promises.readFile(p, 'utf8');
+        let db = JSON.parse(s);
+        const ensured = ensureDbDefaults(db);
+        if (ensured.changed) { await saveDb(ensured.db); }
+        return ensured.db;
+    } catch (_) {
+        const ensured = ensureDbDefaults({ projects: [], folders: [] });
+        try { await saveDb(ensured.db); } catch (_) {}
+        return ensured.db;
+    }
+}
+async function saveDb(db) { const p = appDbPath(); await fs.promises.mkdir(path.dirname(p), { recursive: true }); await fs.promises.writeFile(p, JSON.stringify(db, null, 2), 'utf8'); return true; }
 async function ensureCsvExists(folderPath) {
 	const outPath = csvPath(folderPath);
 	try { await fs.promises.access(outPath, fs.constants.F_OK); }
@@ -107,9 +149,22 @@ async function readCsvScores(folderPath) {
 		for (let i = 1; i < lines.length; i++) {
 			const parts = lines[i].split(',');
 			if (parts.length >= 3) {
-				const filename = parts[0]; const filePath = parts[1]; const scoreStr = parts[2];
-				const key = filePath || filename; const score = parseInt(scoreStr, 10);
-				if (!Number.isNaN(score)) map[key] = score;
+                const filename = (parts[0] || '').trim();
+                const rawPath = (parts[1] || '').trim();
+                const scoreStr = parts[2];
+                const score = parseInt(scoreStr, 10);
+                if (Number.isNaN(score)) continue;
+                const normalized = normalizeSlashes(rawPath);
+                if (normalized) {
+                    map[normalized] = score;
+                    // If CSV path is relative, also map absolute under current folder
+                    if (!path.isAbsolute(rawPath)) {
+                        const abs = normalizeSlashes(path.join(folderPath, rawPath));
+                        map[abs] = score;
+                    }
+                }
+                const base = (normalized ? path.basename(normalized) : filename) || '';
+                if (base) map[base] = score;
 			}
 		}
 		return map;
@@ -120,7 +175,11 @@ async function writeCsvScores(folderPath, records) {
 	const outPath = await ensureCsvExists(folderPath);
 	const header = 'filename,path,score\n';
 	const lines = [header];
-	for (const r of records) lines.push([ r.name, r.path, String(r.score ?? -1) ].join(',') + '\n');
+    for (const r of records) {
+        const rel = r.relPath || normalizeSlashes(path.relative(folderPath, r.path || ''));
+        const pathForCsv = rel || normalizeSlashes(r.path || '');
+        lines.push([ r.name, pathForCsv, String(r.score ?? -1) ].join(',') + '\n');
+    }
 	await fs.promises.writeFile(outPath, lines.join(''), 'utf8');
 	return outPath;
 }
@@ -152,37 +211,97 @@ async function readThumbAsDataUrl(folderPath, id) {
 	} catch (_) { return null; }
 }
 
+// Lightweight image metadata without loading full data
+async function loadImageMetadata(filePath, rootFolder = null) {
+    const stats = await fs.promises.stat(filePath);
+    const rel = rootFolder ? normalizeSlashes(path.relative(rootFolder, filePath)) : null;
+    return {
+        id: `${stats.ino}-${stats.mtimeMs}-${stats.size}`,
+        name: path.basename(filePath),
+        path: filePath,
+        relPath: rel,
+        ext: extOf(filePath),
+        size: stats.size,
+        fullDataUrl: null, // Load on demand
+        thumbDataUrl: null,
+    };
+}
+
 async function selectAndLoadFolder(win) {
 	try {
 		const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'] });
 		if (canceled || !filePaths || filePaths.length === 0) return { folderPath: null, images: [], skipped: 0 };
 		const folderPath = filePaths[0];
 		await ensureCsvExists(folderPath);
-		await ensureThumbsDir(folderPath); // make sure .thumbnails exists up front
+		await ensureThumbsDir(folderPath);
 		try { await exiftool.version(); } catch (_) {}
 		let files = [];
 		try { files = await scanFolderRecursive(folderPath); }
 		catch (e) { return { error: `Failed to scan folder: ${e.message}` }; }
-		const images = []; let skipped = 0;
-		for (let i = 0; i < files.length; i++) {
+		
+        // Return immediately with file paths - no image loading
+		const images = [];
+        for (let i = 0; i < files.length; i++) {
 			const file = files[i];
-			try { images.push(await loadImageToMemory(file)); }
-			catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
-			if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
+            try { 
+                images.push(await loadImageMetadata(file, folderPath)); 
+			}
+			catch (e) { if (isDev) console.warn('Skipped file', file); }
 		}
-		return { folderPath, images, skipped };
+        return { folderPath, images, skipped: 0, totalFiles: files.length };
 	} catch (e) { return { error: e.message }; }
+}
+
+// Multi-folder open helper (returns combined records with folder grouping)
+async function openMultipleFolders(win, folderPaths) {
+    try {
+        const all = [];
+        for (const folderPath of folderPaths) {
+            await ensureCsvExists(folderPath);
+            await ensureThumbsDir(folderPath);
+            let files = [];
+            try { files = await scanFolderRecursive(folderPath); }
+            catch (e) { all.push({ folderPath, error: `Failed to scan: ${e.message}` }); continue; }
+            const images = []; let skipped = 0;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                try { images.push(await loadImageMetadata(file, folderPath)); }
+                catch (e) { skipped++; if (isDev) console.warn('Skipped file', file, e.message); }
+                if ((i + 1) % 50 === 0) { await new Promise(resolve => setImmediate(resolve)); }
+            }
+            all.push({ folderPath, images, skipped });
+        }
+        return { result: all };
+    } catch (e) { return { error: e.message }; }
 }
 
 function createWindow() {
 	const win = new BrowserWindow({
 		width: 1280,
 		height: 900,
-		webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
+		webPreferences: { 
+			contextIsolation: true, 
+			nodeIntegration: false, 
+			preload: path.join(__dirname, 'preload.js'),
+			// Disable GPU acceleration if cache issues persist
+			webSecurity: true,
+			allowRunningInsecureContent: false
+		},
 	});
 	win.loadFile(path.join(__dirname, 'renderer/index.html'));
 	return win;
 }
+
+// Stabilize GPU/Cache behavior on Windows to avoid startup crashes
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('no-sandbox');
+// Force cache to a writable temp location
+try {
+    const tempCacheDir = path.join(os.tmpdir(), 'photo-selector-cache');
+    app.commandLine.appendSwitch('disk-cache-dir', tempCacheDir);
+} catch (_) {}
 
 app.whenReady().then(() => {
 	const win = createWindow();
@@ -193,6 +312,31 @@ app.whenReady().then(() => {
 	ipcMain.handle('cache-thumb', async (_e, folderPath, id, dataUrl) => { try { return await cacheThumb(folderPath, id, dataUrl); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('clear-thumb-cache', async (_e, folderPath) => { try { return await clearThumbCache(folderPath); } catch (e) { return { error: e.message }; } });
 	ipcMain.handle('reveal-in-finder', async (_e, targetPath) => { try { shell.showItemInFolder(targetPath); return true; } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('load-full-image', async (_e, filePath) => { try { return await loadImageToMemory(filePath); } catch (e) { return { error: e.message }; } });
+	ipcMain.handle('generate-thumbnail', async (_e, filePath, folderPath) => { 
+		try { 
+			const fullImage = await loadImageToMemory(filePath);
+			if (fullImage && fullImage.fullDataUrl) {
+				// Generate thumbnail and cache it
+				const thumbCanvas = await generateThumbOnMain(fullImage.fullDataUrl, 400);
+				if (thumbCanvas) {
+					await cacheThumb(folderPath, fullImage.id, thumbCanvas);
+					return { id: fullImage.id, thumbDataUrl: thumbCanvas };
+				}
+			}
+			return { error: 'Failed to generate thumbnail' };
+		} catch (e) { 
+			return { error: e.message }; 
+		} 
+	});
+    // Home/Projects handlers
+    ipcMain.handle('db-load', async () => { try { return await loadDb(); } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-folder', async (_e, folderPath) => { try { const db = await loadDb(); if (!db.folders.includes(folderPath)) db.folders.push(folderPath); const def = db.projects.find(p => p.id === DEFAULT_PROJECT_ID) || db.projects[0]; if (def && !def.folders.includes(folderPath)) def.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-project', async (_e, name) => { try { const db = await loadDb(); const id = Date.now().toString(36); db.projects.push({ id, name, folders: [] }); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-rename-project', async (_e, projectId, name) => { try { const db = await loadDb(); const p = db.projects.find(p => p.id === projectId); if (p && name && typeof name === 'string') { p.name = name; await saveDb(db); } return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('db-add-folder-to-project', async (_e, projectId, folderPath) => { try { const db = await loadDb(); const p = db.projects.find(p => p.id === projectId); if (p && !p.folders.includes(folderPath)) p.folders.push(folderPath); await saveDb(db); return db; } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('open-folders', async (_e, folderPaths) => { try { return await openMultipleFolders(win, folderPaths || []); } catch (e) { return { error: e.message }; } });
+    ipcMain.handle('load-csv-multi', async (_e, folderPaths) => { try { const acc = {}; for (const fp of folderPaths || []) { Object.assign(acc, await readCsvScores(fp)); } return acc; } catch (e) { return { error: e.message }; } });
 	app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

@@ -8,4 +8,15 @@ contextBridge.exposeInMainWorld('api', {
 	cacheThumb: (folderPath, id, dataUrl) => ipcRenderer.invoke('cache-thumb', folderPath, id, dataUrl),
 	clearThumbCache: (folderPath) => ipcRenderer.invoke('clear-thumb-cache', folderPath),
 	revealInFinder: (targetPath) => ipcRenderer.invoke('reveal-in-finder', targetPath),
+	loadFullImage: (filePath) => ipcRenderer.invoke('load-full-image', filePath),
+	generateThumbnail: (filePath, folderPath) => ipcRenderer.invoke('generate-thumbnail', filePath, folderPath),
+    // Home/Projects APIs
+    chooseFolder: () => ipcRenderer.invoke('choose-folder'),
+    dbLoad: () => ipcRenderer.invoke('db-load'),
+    dbAddFolder: (folderPath) => ipcRenderer.invoke('db-add-folder', folderPath),
+    dbAddProject: (name) => ipcRenderer.invoke('db-add-project', name),
+    dbRenameProject: (projectId, name) => ipcRenderer.invoke('db-rename-project', projectId, name),
+    dbAddFolderToProject: (projectId, folderPath) => ipcRenderer.invoke('db-add-folder-to-project', projectId, folderPath),
+    openFolders: (folderPaths) => ipcRenderer.invoke('open-folders', folderPaths),
+    loadCsvMulti: (folderPaths) => ipcRenderer.invoke('load-csv-multi', folderPaths),
 });

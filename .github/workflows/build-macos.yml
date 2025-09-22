@@ -1,0 +1,43 @@
+name: Build macOS (DMG/ZIP)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS (${{ matrix.arch }})
+        run: npx electron-builder --mac --${{ matrix.arch }} -p never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_BUILDER_DISABLE_UPDATER: 'true'
+
+      - name: Upload artifacts (${{ matrix.arch }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: photo-selector-electron-mac-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+
+
