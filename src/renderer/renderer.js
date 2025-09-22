@@ -110,6 +110,7 @@ function loadSettings() {
 	maxThumbnailTasks.value = appSettings.maxThumbnailTasks;
 	
 	// Apply settings to app
+	applyTheme(appSettings.theme);
 	applyGridSize(appSettings.defaultThumbSize);
 	if (gridSlider) gridSlider.value = appSettings.defaultThumbSize;
 }
@@ -129,10 +130,16 @@ function saveSettings() {
 	}
 	
 	// Apply changes immediately
+	applyTheme(appSettings.theme);
 	applyGridSize(appSettings.defaultThumbSize);
 	if (gridSlider) gridSlider.value = appSettings.defaultThumbSize;
 	
 	showToast('Settings saved', 'success', 1500);
+}
+
+// Theme management
+function applyTheme(theme) {
+	document.documentElement.setAttribute('data-theme', theme);
 }
 
 // Fullscreen functionality
@@ -998,6 +1005,11 @@ showKeyboardHelpBtn.addEventListener('click', () => {
 // Settings controls
 defaultThumbSize.addEventListener('input', () => {
 	thumbSizeLabel.textContent = defaultThumbSize.value + 'px';
+});
+
+themeSelect.addEventListener('change', () => {
+	applyTheme(themeSelect.value);
+	showToast(`Theme changed to ${themeSelect.value}`, 'info', 1500);
 });
 
 clearThumbsBtn.addEventListener('click', async () => {
