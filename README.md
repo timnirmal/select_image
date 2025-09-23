@@ -19,34 +19,35 @@ npm run dev
 
 ## Build
 
-### macOS
+### macOS (arm64)
 ```bash
-npm run build   # Produces signed (non-notarized) DMG/ZIP locally
-# or to build without publishing and keep artifacts locally
-npm run pack
+npm run build:mac    # Builds DMG/ZIP for Apple Silicon
+# or
+npm run pack:mac     # Same as build but without publishing
 ```
-Artifacts will be in `dist/`.
+Artifacts: `dist/photo-selector-electron-<version>-arm64.dmg` and `...-arm64-mac.zip`
 
-### Windows
+### Windows (.exe)
+Run on Windows for best results.
 ```powershell
 # From repo root
 npm ci
-
-# Build Windows installer (.exe)
-npm run build:win
+npm run build:win    # Builds NSIS installer (.exe)
 ```
 Artifacts:
-- Installer: `dist/photo-selector-electron-Setup-0.1.0.exe`
-- Unpacked app: `dist/win-unpacked/photo-selector-electron.exe`
+- Installer: `dist/photo-selector-electron-Setup-<version>.exe`
+- Unpacked: `dist/win-unpacked/photo-selector-electron.exe`
 
-Troubleshooting:
-- If you see ENOENT for `node_modules\\exiftool-vendored.pl`, the optional Perl package is not installed (it's optional on Windows). The build script now ensures an empty directory exists to satisfy the packager, and we include the Windows binary `exiftool-vendored.exe` via `asarUnpack`.
-- If signing steps download tools, allow time for first-run. No code-signing cert is required for local builds.
+### Notes
+- mac build unpacks `node_modules/exiftool-vendored/**` for RAW preview extraction.
+- Windows build unpacks `node_modules/exiftool-vendored.exe/**`.
+- A small prebuild step creates placeholders so cross-OS packaging won’t fail if optional platform packages are missing.
+- Local mac builds are unsigned (non-notarized). You can open via context-menu → Open if Gatekeeper warns.
 
 ## Usage
 - Click "Open Folder" and select the top-level directory. App recursively loads images and RAW previews into memory.
 - Gallery: click a thumbnail to open viewer.
-- Viewer keyboard shortcuts:
+- Viewer shortcuts:
   - Left/Right: previous/next
   - Space: like/unlike
   - 1..5: set score (default 5)
@@ -54,7 +55,11 @@ Troubleshooting:
   - g: back to gallery
 - Save CSV writes `image_selections.csv` to the opened folder.
 
-## Notes
-- RAWs use embedded previews extracted via `exiftool-vendored`. If a RAW has no embedded preview, it is skipped.
-- All images are normalized to JPEG in memory for consistent display; originals are untouched.
-- For huge folders, initial loading may take time while building in-memory cache.
+## Troubleshooting
+- If you see ENOENT for `node_modules\\exiftool-vendored.pl` or `.exe`, run `npm run build` once on that OS or re-install deps there; placeholders are created automatically during prebuild.
+- If downloads are slow/failing during Electron fetch, rerun later or use a mirror and clear cache:
+```bash
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
+ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \
+rm -rf "$HOME/.cache/electron" "$HOME/.cache/electron-builder"
+```

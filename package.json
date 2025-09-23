@@ -5,8 +5,11 @@
   "main": "src/main.js",
   "scripts": {
     "dev": "electronmon .",
-    "build": "electron-builder --mac",
-    "pack": "electron-builder --mac -p never",
+    "build": "npm run build:mac",
+    "build:mac": "electron-builder --mac --arm64",
+    "pack": "npm run pack:mac",
+    "pack:mac": "electron-builder --mac -p never --arm64",
+    "prebuild": "node scripts/ensure-exiftool-pl.js",
     "prebuild:win": "node scripts/ensure-exiftool-pl.js",
     "build:win": "npm run prebuild:win && electron-builder --win"
   },
@@ -41,20 +44,23 @@
   },
   "build": {
     "appId": "com.photo.selector",
-    "asarUnpack": [
-      "node_modules/exiftool-vendored.exe/**"
-    ],
     "mac": {
       "category": "public.app-category.photography",
       "target": [
         "dmg",
         "zip"
       ],
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "asarUnpack": [
+        "node_modules/exiftool-vendored/**"
+      ]
     },
     "win": {
       "target": ["nsis"],
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "asarUnpack": [
+        "node_modules/exiftool-vendored.exe/**"
+      ]
     },
     "files": [
       "src/**",
